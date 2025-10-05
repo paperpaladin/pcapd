@@ -1,0 +1,7 @@
+/pcapd
+/scratch/
+t/corpus/
+t/tmp.*
+*.pcap
+*.pcapng
+*.tmp
