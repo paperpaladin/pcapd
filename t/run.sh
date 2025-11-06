@@ -23,6 +23,19 @@ for f in *.go go.mod; do
 	fi
 done
 
+# A missing oracle is a refusal, not a reduced run. tshark is the authority
+# for every field value and every reassembled byte here; without it the suite
+# would report a number having checked nothing.
+for tool in tshark tcpdump capinfos editcap python3; do
+	command -v $tool >/dev/null 2>&1 || {
+		echo "pcapd: $tool is not installed and is the oracle for most of this suite" >&2
+		exit 2
+	}
+done
+
+W=$(mktemp -d "${TMPDIR:-/tmp}/pcapd.XXXXXXXX") || exit 2
+trap 'rm -rf "$W"' EXIT INT TERM
+
 pass=0
 fail=0
 ok()  { pass=$((pass+1)); echo "ok   $*"; }
@@ -47,10 +60,68 @@ status() {
 	eq "$name" "$want" "$?"
 }
 
-echo "--- cli surface ---"
+echo "--- corpus ---"
+sh t/corpus.sh || { echo "corpus build failed" >&2; exit 2; }
+LIVE=$(ls t/corpus/live/*.pcap 2>/dev/null | wc -l)
+CONV=$(ls t/corpus/conv/* 2>/dev/null | wc -l)
+HAND=$(ls t/corpus/hand/* 2>/dev/null | wc -l)
+echo "live captures: $LIVE   conversions: $CONV   hand-built: $HAND"
+if [ "$LIVE" -eq 0 ]; then
+	echo "SKIP live capture unavailable: every packet below was written by us."
+	echo "     See t/corpus/live.log. This needs unshare -rn to work."
+fi
+
+# Files pcapd is expected to read. The -mod.pcap conversions are excluded
+# here and checked as refusals further down.
+corpus_ok() {
+	ls t/corpus/live/*.pcap t/corpus/hand/*.pcap 2>/dev/null
+	ls t/corpus/conv/*.pcap 2>/dev/null | grep -v -- '-mod\.pcap$'
+}
+
+echo
+echo "--- file-level facts against capinfos ---"
+# capinfos -M -T -r prints one tab-separated row: name, type, encapsulation,
+# timestamp precision, snaplen, ..., packet count, file size, data size.
+facts=0
+files=0
+for f in $(corpus_ok); do
+	$PCAPD info "$f" > "$W/info" 2>"$W/err" || { bad "info $f: $(cat "$W/err")"; continue; }
+	get() { sed -n "s/^$1: //p" "$W/info"; }
+	mine="$(get filetype)|$(get packets)|$(get datasize)"
+	ci=$(capinfos -M -T -r "$f" 2>/dev/null)
+	theirs="$(echo "$ci" | cut -f2)|$(echo "$ci" | cut -f8)|$(echo "$ci" | cut -f10)"
+	eq "capinfos $(basename "$f")" "$theirs" "$mine"
+	facts=$((facts+3))
+	files=$((files+1))
+done
+echo "     $facts file-level facts over $files files"
+
+echo
+echo "--- refusals ---"
 status "no args is a usage error"    2 $PCAPD
 status "unknown command is usage"    2 $PCAPD frobnicate
 status "--help exits clean"          0 $PCAPD --help
+status "missing file is refused"     1 $PCAPD info "$W/nope.pcap"
+: > "$W/empty.pcap"
+status "empty file is refused"       1 $PCAPD info "$W/empty.pcap"
+printf 'not a capture at all\n' > "$W/text.pcap"
+status "text file is refused"        1 $PCAPD info "$W/text.pcap"
+for m in t/corpus/conv/*-mod.pcap; do
+	[ -e "$m" ] || continue
+	status "modified-format pcap refused ($(basename "$m"))" 1 $PCAPD info "$m"
+	break
+done
+
+# pcapng is not implemented yet. The pair of assertions is the useful shape:
+# capinfos must READ the file, and pcapd must refuse it cleanly. A missing
+# feature whose failure mode is a clean error is a different thing from one
+# that quietly decodes something that looked close enough.
+for n in t/corpus/hand/*.pcapng t/corpus/conv/*.pcapng; do
+	[ -e "$n" ] || continue
+	status "pcapng readable by capinfos ($(basename "$n"))" 0 capinfos -M -T -r "$n"
+	status "pcapng refused cleanly by pcapd"                1 $PCAPD info "$n"
+	break
+done
 
 echo
 echo "$pass passed, $fail failed"

@@ -50,6 +50,14 @@ func cmdInfo(c *Capture) {
 	if c.BigEnd {
 		order = "big"
 	}
+	// filetype is the name capinfos prints, which distinguishes the
+	// nanosecond pcap variant from the microsecond one by a different name
+	// rather than by a separate field.
+	ft := c.Format
+	if c.Nanos {
+		ft = "nsecpcap"
+	}
+	fmt.Printf("filetype: %s\n", ft)
 	fmt.Printf("format: %s\n", c.Format)
 	fmt.Printf("byteorder: %s\n", order)
 	if c.Format == "pcap" {
