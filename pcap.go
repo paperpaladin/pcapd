@@ -59,8 +59,11 @@ type Capture struct {
 	Packets  []Packet
 	// Sections counts pcapng section header blocks; classic pcap has none.
 	Sections int
-	// Comments and unknown block types seen, for info output.
+	// BlockCounts records how many of each pcapng block type were seen,
+	// including the ones we skip, so info can report them.
 	BlockCounts map[uint32]int
+	// Names holds pcapng name resolution records.
+	Names []NameRecord
 }
 
 // readPcap decodes a classic pcap file. The byte order is decided by the

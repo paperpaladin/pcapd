@@ -74,7 +74,8 @@ fi
 # Files pcapd is expected to read. The -mod.pcap conversions are excluded
 # here and checked as refusals further down.
 corpus_ok() {
-	ls t/corpus/live/*.pcap t/corpus/hand/*.pcap 2>/dev/null
+	ls t/corpus/live/*.pcap t/corpus/hand/*.pcap t/corpus/hand/*.pcapng \
+	   t/corpus/conv/*.pcapng 2>/dev/null
 	ls t/corpus/conv/*.pcap 2>/dev/null | grep -v -- '-mod\.pcap$'
 }
 
@@ -112,16 +113,6 @@ for m in t/corpus/conv/*-mod.pcap; do
 	break
 done
 
-# pcapng is not implemented yet. The pair of assertions is the useful shape:
-# capinfos must READ the file, and pcapd must refuse it cleanly. A missing
-# feature whose failure mode is a clean error is a different thing from one
-# that quietly decodes something that looked close enough.
-for n in t/corpus/hand/*.pcapng t/corpus/conv/*.pcapng; do
-	[ -e "$n" ] || continue
-	status "pcapng readable by capinfos ($(basename "$n"))" 0 capinfos -M -T -r "$n"
-	status "pcapng refused cleanly by pcapd"                1 $PCAPD info "$n"
-	break
-done
 
 echo
 echo "$pass passed, $fail failed"
