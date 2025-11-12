@@ -98,6 +98,16 @@ done
 echo "     $facts file-level facts over $files files"
 
 echo
+echo "--- per-field values against tshark ---"
+# Per field and per packet, never per file. The totals line is what the
+# README quotes; the per-file lines only appear when something disagrees.
+fc=$(PCAPD=$PCAPD python3 t/fieldcmp.py $(corpus_ok))
+echo "$fc" | grep -v '^TOTAL'
+eval "$(echo "$fc" | sed -n 's/^TOTAL //p')"
+eq "tshark fields: nothing disagrees" "differ=0 broken=0" "differ=$differ broken=$broken"
+echo "     $compared values compared over $files files: $same same, $differ differ, $refused refused"
+
+echo
 echo "--- refusals ---"
 status "no args is a usage error"    2 $PCAPD
 status "unknown command is usage"    2 $PCAPD frobnicate

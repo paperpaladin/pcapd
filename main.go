@@ -21,6 +21,7 @@ const usage = `usage: pcapd COMMAND [options] FILE
 
 commands:
   info     file-level facts: format, byte order, link type, packet count
+  fields   per-packet field values, one line per packet, tab separated
 `
 
 func die(format string, a ...any) {
@@ -71,6 +72,8 @@ func main() {
 			os.Exit(exitUsage)
 		}
 		cmdInfo(load(args[0]))
+	case "fields":
+		cmdFields(args)
 	default:
 		fmt.Fprintf(os.Stderr, "pcapd: unknown command %q\n", cmd)
 		os.Exit(exitUsage)
