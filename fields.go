@@ -49,6 +49,29 @@ func init() {
 	// Wireshark's IPv6 dissector registers the same ip.version field as
 	// the IPv4 one, so an IPv6 packet has ip.version 6 and not an empty
 	// cell. Found by the comparison, not by reading the source.
+	reg("sll.pkttype", sl(func(f *Frame) string { return fmt.Sprint(f.SLLPktType) }))
+	reg("sll.hatype", sl(func(f *Frame) string { return fmt.Sprint(f.SLLHatype) }))
+	reg("sll.halen", sl(func(f *Frame) string { return fmt.Sprint(f.SLLHalen) }))
+	reg("sll.etype", sl(func(f *Frame) string { return fmt.Sprintf("0x%04x", f.SLLEtype) }))
+	reg("sll.ifindex", sl(func(f *Frame) string {
+		if !f.SLLv2 {
+			return ""
+		}
+		return fmt.Sprint(f.SLLIfindex)
+	}))
+	reg("sll.src.eth", sl(func(f *Frame) string {
+		if f.SLLHalen != 6 {
+			return ""
+		}
+		return hexcolon(f.SLLAddr)
+	}))
+	reg("null.family", func(f *Frame) string {
+		if !f.HasNull {
+			return absent(f)
+		}
+		return fmt.Sprint(f.NullAF)
+	})
+
 	reg("ip.version", func(f *Frame) string {
 		if f.IPVer == 0 {
 			return absent(f)
@@ -106,11 +129,24 @@ func mac(f *Frame, b []byte) string {
 	if !f.HasEth {
 		return absent(f)
 	}
+	return hexcolon(b)
+}
+
+func hexcolon(b []byte) string {
 	p := make([]string, len(b))
 	for i, c := range b {
 		p[i] = fmt.Sprintf("%02x", c)
 	}
 	return strings.Join(p, ":")
+}
+
+func sl(fn fieldFn) fieldFn {
+	return func(f *Frame) string {
+		if !f.HasSLL {
+			return absent(f)
+		}
+		return fn(f)
+	}
 }
 
 func v4(fn fieldFn) fieldFn {

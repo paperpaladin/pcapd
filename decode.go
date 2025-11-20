@@ -17,6 +17,18 @@ type Frame struct {
 	EthSrc  []byte
 	EthType uint16
 
+	HasSLL     bool
+	SLLv2      bool
+	SLLPktType uint16
+	SLLHatype  uint16
+	SLLHalen   uint16
+	SLLAddr    []byte
+	SLLIfindex uint32
+	SLLEtype   uint16
+
+	HasNull bool
+	NullAF  uint32
+
 	VLANIDs []uint16
 	VLANPCP []uint8
 
@@ -92,6 +104,14 @@ func decode(p *Packet) *Frame {
 	switch p.LinkType {
 	case dltEther:
 		f.decodeEther(c)
+	case dltSLL:
+		f.decodeSLL(c)
+	case dltSLL2:
+		f.decodeSLL2(c)
+	case dltRaw, dltRaw4, dltRaw6:
+		f.decodeRawIP(c)
+	case dltNull, dltLoop:
+		f.decodeNull(c, p.LinkType == dltLoop)
 	default:
 		f.refuse("link type %d (%s) is not decoded", p.LinkType, linkName(p.LinkType))
 	}
@@ -108,6 +128,113 @@ func (f *Frame) decodeEther(c *cursor) {
 		return
 	}
 	f.decodeEtherType(c, f.EthType)
+}
+
+// decodeSLL reads Linux cooked capture v1: 16 bytes, with the protocol
+// last. tcpdump writes this for "-i any" on older kernels and for a few
+// device types that have no link header of their own.
+func (f *Frame) decodeSLL(c *cursor) {
+	f.HasSLL = true
+	f.SLLPktType = c.u16()
+	f.SLLHatype = c.u16()
+	f.SLLHalen = c.u16()
+	addr := c.take(8)
+	f.SLLEtype = c.u16()
+	if !c.ok() {
+		f.refuse("linux cooked header: %v", c.err)
+		return
+	}
+	f.sllAddr(addr)
+	f.decodeEtherType(c, f.SLLEtype)
+}
+
+// decodeSLL2 reads Linux cooked capture v2: 20 bytes, protocol first, with
+// an interface index that v1 does not carry. This is what "tcpdump -i any"
+// produces on a current kernel and nothing else on this machine writes it.
+func (f *Frame) decodeSLL2(c *cursor) {
+	f.HasSLL = true
+	f.SLLv2 = true
+	f.SLLEtype = c.u16()
+	c.u16() // reserved
+	f.SLLIfindex = c.u32()
+	f.SLLHatype = c.u16()
+	f.SLLPktType = uint16(c.u8())
+	f.SLLHalen = uint16(c.u8())
+	addr := c.take(8)
+	if !c.ok() {
+		f.refuse("linux cooked v2 header: %v", c.err)
+		return
+	}
+	f.sllAddr(addr)
+	f.decodeEtherType(c, f.SLLEtype)
+}
+
+// The address field is always eight bytes and the length says how much of
+// it is real. Wireshark only names it sll.src.eth when the length is six.
+func (f *Frame) sllAddr(addr []byte) {
+	if f.SLLHalen <= 8 && int(f.SLLHalen) <= len(addr) {
+		f.SLLAddr = addr[:f.SLLHalen]
+	}
+}
+
+// decodeRawIP reads a bare IP packet with no link header at all. The
+// version nibble is the only thing that says which one it is.
+func (f *Frame) decodeRawIP(c *cursor) {
+	if c.left() < 1 {
+		f.refuse("raw IP link type with an empty packet")
+		return
+	}
+	switch c.b[c.pos] >> 4 {
+	case 4:
+		f.decodeIPv4(c)
+	case 6:
+		f.decodeIPv6(c)
+	default:
+		f.refuse("raw IP link type with version nibble %d", c.b[c.pos]>>4)
+	}
+}
+
+// decodeNull reads the four-byte address family of DLT_NULL and DLT_LOOP.
+// DLT_NULL writes it in the host byte order of whatever captured the file,
+// which is not recoverable from the file, so the value is read both ways
+// and the one that names a known family wins. DLT_LOOP is always network
+// byte order and needs no guessing.
+func (f *Frame) decodeNull(c *cursor, loop bool) {
+	raw := c.take(4)
+	if !c.ok() {
+		f.refuse("null/loopback header: %v", c.err)
+		return
+	}
+	f.HasNull = true
+	v := be32(raw)
+	if !loop {
+		le := swap32(v)
+		if !knownAF(v) && knownAF(le) {
+			v = le
+		}
+	}
+	f.NullAF = v
+	switch v {
+	case 2:
+		f.decodeIPv4(c)
+	case 24, 28, 30:
+		// AF_INET6 is 24 on OpenBSD, 28 on FreeBSD and 30 on macOS, and
+		// those are the three Wireshark accepts. It is 10 on Linux and
+		// 23 on Windows, and Wireshark decodes neither, so neither do
+		// we: a corpus file with family 10 is in t/corpus/hand and both
+		// tools stop at the link layer on it.
+		f.decodeIPv6(c)
+	default:
+		f.refuse("null/loopback address family %d is not decoded", v)
+	}
+}
+
+func knownAF(v uint32) bool {
+	switch v {
+	case 2, 24, 28, 30:
+		return true
+	}
+	return false
 }
 
 func (f *Frame) decodeEtherType(c *cursor, et uint16) {

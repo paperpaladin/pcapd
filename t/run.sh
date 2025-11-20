@@ -105,7 +105,8 @@ fc=$(PCAPD=$PCAPD python3 t/fieldcmp.py $(corpus_ok))
 echo "$fc" | grep -v '^TOTAL'
 eval "$(echo "$fc" | sed -n 's/^TOTAL //p')"
 eq "tshark fields: nothing disagrees" "differ=0 broken=0" "differ=$differ broken=$broken"
-echo "     $compared values compared over $files files: $same same, $differ differ, $refused refused"
+echo "     $compared values compared over $files files: $same same, $differ differ,"
+echo "     $refused refused (tshark had a value), $declined declined (neither did)"
 
 echo
 echo "--- refusals ---"

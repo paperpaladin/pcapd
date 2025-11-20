@@ -4,15 +4,21 @@ Per field and per packet, never per file. "Read 10,000 packets" says
 nothing; the useful number is how many individual values were put next to
 somebody else's value for the same thing.
 
-Three outcomes per cell, counted separately:
+Four outcomes per cell, counted separately:
 
     same      byte-identical strings
     differ    both sides produced a value and the values are not equal
-    refused   pcapd printed "?", meaning it knows it did not decode this
+    refused   pcapd printed "?" and tshark printed a value. A layer we
+              did not decode and tshark did: work that is not done.
+    declined  pcapd printed "?" and tshark printed nothing either. We
+              stopped at a layer tshark also does not dissect, so there
+              is no value to be wrong about.
 
-A refusal is not a pass. It is counted apart from a disagreement because the
-two need different work: a disagreement is a bug, a refusal is a feature
-that is not written yet.
+A refusal is not a pass. It is counted apart from a disagreement because
+the two need different work: a disagreement is a bug, a refusal is a
+feature that is not written yet. declined is split out from refused
+because a file built to exercise an undecodable payload would otherwise
+add hundreds to the refusal count and hide the ones that matter.
 """
 import os
 import subprocess
@@ -21,6 +27,8 @@ import sys
 FIELDS = [
     "frame.number", "frame.len", "frame.cap_len", "frame.time_epoch",
     "eth.src", "eth.dst", "eth.type",
+    "sll.pkttype", "sll.hatype", "sll.halen", "sll.etype", "sll.ifindex",
+    "sll.src.eth",
     "ip.version", "ip.hdr_len", "ip.dsfield", "ip.len", "ip.id", "ip.flags",
     "ip.frag_offset", "ip.ttl", "ip.proto", "ip.checksum", "ip.src", "ip.dst",
     "ipv6.version", "ipv6.tclass", "ipv6.flow", "ipv6.plen", "ipv6.nxt",
@@ -69,12 +77,15 @@ def compare(path, fields):
     pr = rows(pout, len(fields))
     if len(tr) != len(pr):
         return None, "packet count: tshark %d, pcapd %d" % (len(tr), len(pr))
-    same = differ = refused = 0
+    same = differ = refused = declined = 0
     shown = []
     for i, (a, b) in enumerate(zip(tr, pr)):
         for j, name in enumerate(fields):
             if b[j] == "?":
-                refused += 1
+                if a[j] == "":
+                    declined += 1
+                else:
+                    refused += 1
             elif a[j] == b[j]:
                 same += 1
             else:
@@ -82,7 +93,7 @@ def compare(path, fields):
                 if len(shown) < MAXSHOW:
                     shown.append("    packet %d %s: tshark %r pcapd %r"
                                  % (i + 1, name, a[j], b[j]))
-    return (same, differ, refused, shown), None
+    return (same, differ, refused, declined, shown), None
 
 
 def main(argv):
@@ -91,7 +102,7 @@ def main(argv):
     if paths and paths[0].startswith("--fields="):
         fields = paths[0][len("--fields="):].split(",")
         paths = paths[1:]
-    tot_same = tot_diff = tot_ref = 0
+    tot_same = tot_diff = tot_ref = tot_dec = 0
     broken = 0
     for path in paths:
         res, err = compare(path, fields)
@@ -99,16 +110,20 @@ def main(argv):
             broken += 1
             print("BROKEN %s: %s" % (path, err))
             continue
-        same, differ, refused, shown = res
+        same, differ, refused, declined, shown = res
         tot_same += same
         tot_diff += differ
         tot_ref += refused
+        tot_dec += declined
         if differ:
-            print("DIFFER %s: %d of %d" % (path, differ, same + differ + refused))
+            print("DIFFER %s: %d of %d"
+                  % (path, differ, same + differ + refused + declined))
             for s in shown:
                 print(s)
-    print("TOTAL compared=%d same=%d differ=%d refused=%d broken=%d files=%d"
-          % (tot_same + tot_diff, tot_same, tot_diff, tot_ref, broken, len(paths)))
+    print("TOTAL compared=%d same=%d differ=%d refused=%d declined=%d "
+          "broken=%d files=%d"
+          % (tot_same + tot_diff, tot_same, tot_diff, tot_ref, tot_dec,
+             broken, len(paths)))
     return 0
 
 

@@ -50,14 +50,15 @@ def vlan(payload, vid, etype=ETH_IP4, pcp=0, dei=0):
 def sll(payload, etype=ETH_IP4, pkttype=0, hatype=1, addr=MAC_A):
     """Linux cooked capture v1: 16 bytes before the network header."""
     return (struct.pack(">HHH", pkttype, hatype, len(addr))
-            + addr + b"\x00" * (8 - len(addr)) + struct.pack(">H", etype))
+            + addr + b"\x00" * (8 - len(addr)) + struct.pack(">H", etype)
+            + payload)
 
 
 def sll2(payload, etype=ETH_IP4, ifindex=1, pkttype=0, hatype=1, addr=MAC_A):
     """Linux cooked capture v2: protocol first, 20 bytes total."""
     return (struct.pack(">HHI", etype, 0, ifindex)
             + struct.pack(">HBB", hatype, pkttype, len(addr))
-            + addr + b"\x00" * (8 - len(addr)))
+            + addr + b"\x00" * (8 - len(addr)) + payload)
 
 
 def null(payload, af=2):
@@ -280,6 +281,30 @@ def main(outdir):
     write_pcap(p("tcp-basic-ns.pcap"), basic, nano=True)
     write_pcapng(p("tcp-basic.pcapng"), basic)
     write_pcapng(p("tcp-basic-be.pcapng"), basic, big=True)
+
+    # The same conversation under every link type we decode. Stripping the
+    # ethernet header off frames we built is safe because we built them.
+    bare = [fr[14:] for fr in basic]
+    write_pcap(p("link-raw.pcap"), bare, link=LINK_RAW)
+    write_pcap(p("link-sll.pcap"), [sll(x) for x in bare], link=LINK_SLL)
+    write_pcap(p("link-sll2.pcap"), [sll2(x) for x in bare], link=LINK_SLL2)
+    write_pcap(p("link-null.pcap"), [null(x) for x in bare], link=LINK_NULL)
+    write_pcap(p("link-loop.pcap"), [struct.pack(">I", 2) + x for x in bare],
+               link=108)
+    # A cooked header whose hardware address is not six bytes, so the
+    # sll.src.eth field is absent rather than wrong.
+    write_pcap(p("link-sll-halen0.pcap"),
+               [sll(x, addr=b"") for x in bare], link=LINK_SLL)
+
+    v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
+                          src=IP6_A, dst=IP6_B)
+    bare6 = [fr[14:] for fr in v6conv]
+    write_pcap(p("link-raw6.pcap"), bare6, link=LINK_RAW)
+    for af, name in ((10, "linux"), (28, "freebsd"), (30, "macos")):
+        write_pcap(p("link-null6-%s.pcap" % name),
+                   [struct.pack("<I", af) + x for x in bare6], link=LINK_NULL)
+    write_pcap(p("link-loop6.pcap"),
+               [struct.pack(">I", 24) + x for x in bare6], link=108)
 
 
 if __name__ == "__main__":
