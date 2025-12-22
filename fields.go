@@ -49,6 +49,18 @@ func init() {
 	// Wireshark's IPv6 dissector registers the same ip.version field as
 	// the IPv4 one, so an IPv6 packet has ip.version 6 and not an empty
 	// cell. Found by the comparison, not by reading the source.
+	// Wireshark gives the 802.1ad tag a different dissector from the
+	// 802.1Q one, so the outer tag of a stacked pair answers to
+	// ieee8021ad.id and not to vlan.id. Found by building a stacked
+	// capture and seeing one id where two were expected.
+	reg("vlan.id", tag(0x8100, func(t VLANTag) string { return fmt.Sprint(t.VID) }))
+	reg("vlan.priority", tag(0x8100, func(t VLANTag) string { return fmt.Sprint(t.PCP) }))
+	reg("vlan.dei", tag(0x8100, func(t VLANTag) string { return boolStr(t.DEI) }))
+	reg("vlan.etype", tag(0x8100, func(t VLANTag) string { return fmt.Sprintf("0x%04x", t.Inner) }))
+	reg("ieee8021ad.id", tag(0x88A8, func(t VLANTag) string { return fmt.Sprint(t.VID) }))
+	reg("ieee8021ad.priority", tag(0x88A8, func(t VLANTag) string { return fmt.Sprint(t.PCP) }))
+	reg("ieee8021ad.dei", tag(0x88A8, func(t VLANTag) string { return fmt.Sprint(t.DEI) }))
+
 	reg("sll.pkttype", sl(func(f *Frame) string { return fmt.Sprint(f.SLLPktType) }))
 	reg("sll.hatype", sl(func(f *Frame) string { return fmt.Sprint(f.SLLHatype) }))
 	reg("sll.halen", sl(func(f *Frame) string { return fmt.Sprint(f.SLLHalen) }))
@@ -138,6 +150,30 @@ func hexcolon(b []byte) string {
 		p[i] = fmt.Sprintf("%02x", c)
 	}
 	return strings.Join(p, ":")
+}
+
+// tag answers for every stacked tag introduced by one TPID, joined with
+// commas the way tshark joins repeated occurrences of a field.
+func tag(tpid uint16, fn func(VLANTag) string) fieldFn {
+	return func(f *Frame) string {
+		var out []string
+		for _, t := range f.Tags {
+			if t.TPID == tpid {
+				out = append(out, fn(t))
+			}
+		}
+		if len(out) == 0 {
+			return absent(f)
+		}
+		return strings.Join(out, ",")
+	}
+}
+
+func boolStr(v uint8) string {
+	if v != 0 {
+		return "True"
+	}
+	return "False"
 }
 
 func sl(fn fieldFn) fieldFn {

@@ -27,6 +27,8 @@ import sys
 FIELDS = [
     "frame.number", "frame.len", "frame.cap_len", "frame.time_epoch",
     "eth.src", "eth.dst", "eth.type",
+    "vlan.id", "vlan.priority", "vlan.dei", "vlan.etype",
+    "ieee8021ad.id", "ieee8021ad.priority", "ieee8021ad.dei",
     "sll.pkttype", "sll.hatype", "sll.halen", "sll.etype", "sll.ifindex",
     "sll.src.eth",
     "ip.version", "ip.hdr_len", "ip.dsfield", "ip.len", "ip.id", "ip.flags",

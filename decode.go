@@ -29,8 +29,7 @@ type Frame struct {
 	HasNull bool
 	NullAF  uint32
 
-	VLANIDs []uint16
-	VLANPCP []uint8
+	Tags []VLANTag
 
 	IPVer int // 4, 6, or 0 for neither
 
@@ -78,6 +77,17 @@ type Frame struct {
 	Payload []byte // transport payload, as much of it as was captured
 
 	Refuse string
+}
+
+// VLANTag is one 802.1Q or 802.1ad tag. TPID is the ethertype that
+// introduced it, which is what decides whether Wireshark dissects it as
+// vlan or as ieee8021ad, and so which field names it answers to.
+type VLANTag struct {
+	TPID  uint16
+	PCP   uint8
+	DEI   uint8
+	VID   uint16
+	Inner uint16
 }
 
 func (f *Frame) refuse(format string, a ...any) {
@@ -243,6 +253,26 @@ func (f *Frame) decodeEtherType(c *cursor, et uint16) {
 		f.decodeIPv4(c)
 	case 0x86DD:
 		f.decodeIPv6(c)
+	case 0x8100, 0x88A8, 0x9100:
+		// A tag is four bytes: three bits of priority, one drop-eligible
+		// bit, twelve of VLAN id, then the ethertype of whatever is
+		// inside. Tags stack, and the loop is bounded only by the frame
+		// running out, which is the bound that matters.
+		if len(f.Tags) >= 16 {
+			f.refuse("more than 16 stacked VLAN tags")
+			return
+		}
+		tci := c.u16()
+		inner := c.u16()
+		if !c.ok() {
+			f.refuse("vlan tag: %v", c.err)
+			return
+		}
+		f.Tags = append(f.Tags, VLANTag{
+			TPID: et, PCP: uint8(tci >> 13), DEI: uint8(tci>>12) & 1,
+			VID: tci & 0x0fff, Inner: inner,
+		})
+		f.decodeEtherType(c, inner)
 	default:
 		if et <= 1500 {
 			f.refuse("ethernet length field %d, not a type: 802.3 framing is not decoded", et)

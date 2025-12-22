@@ -296,6 +296,16 @@ def main(outdir):
     write_pcap(p("link-sll-halen0.pcap"),
                [sll(x, addr=b"") for x in bare], link=LINK_SLL)
 
+    # 802.1Q, and two stacked tags. The outer tag of a stacked pair uses
+    # the 802.1ad ethertype, which is what a provider bridge writes.
+    tagged = [eth(vlan(fr[14:], 42), ETH_VLAN) for fr in basic]
+    write_pcap(p("vlan-single.pcap"), tagged)
+    stacked = [eth(vlan(vlan(fr[14:], 7, etype=ETH_IP4), 300, etype=ETH_VLAN),
+                   ETH_QINQ) for fr in basic]
+    write_pcap(p("vlan-stacked.pcap"), stacked)
+    prio = [eth(vlan(fr[14:], 4095, pcp=5, dei=1), ETH_VLAN) for fr in basic]
+    write_pcap(p("vlan-prio.pcap"), prio)
+
     v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
                           src=IP6_A, dst=IP6_B)
     bare6 = [fr[14:] for fr in v6conv]
