@@ -306,6 +306,29 @@ def main(outdir):
     prio = [eth(vlan(fr[14:], 4095, pcp=5, dei=1), ETH_VLAN) for fr in basic]
     write_pcap(p("vlan-prio.pcap"), prio)
 
+    # IPv6 extension header chains. The transport sits behind one, two and
+    # three headers, and one file carries a next-header value no dissector
+    # knows, which must stop the chain rather than be walked past.
+    def v6pkt(chain, nxt_first, payload_proto=6, seq=1000):
+        seg = tcp(b"ext-header payload", sport=40000, dport=80, seq=seq,
+                  ack=1, flags=PSH | ACK, src=IP6_A, dst=IP6_B, v6=True)
+        body = b"".join(chain) + seg
+        return eth(ip6(body, nxt=nxt_first, src=IP6_A, dst=IP6_B), ETH_IP6)
+
+    hop = ip6_ext(6, b"\x01\x02\x00\x00\x00\x00")          # PadN option
+    dst = ip6_ext(6, b"\x01\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+    rt = struct.pack(">BBBB", 6, 0, 0, 0) + b"\x00" * 4
+    write_pcap(p("ip6-hopopt.pcap"), [v6pkt([hop], 0)], link=LINK_ETHER)
+    write_pcap(p("ip6-dstopt.pcap"), [v6pkt([dst], 60)], link=LINK_ETHER)
+    write_pcap(p("ip6-routing.pcap"), [v6pkt([rt], 43)], link=LINK_ETHER)
+    chain3 = [ip6_ext(60, b"\x01\x02\x00\x00\x00\x00"),
+              ip6_ext(43, b"\x01\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"),
+              struct.pack(">BBBB", 6, 0, 0, 0) + b"\x00" * 4]
+    write_pcap(p("ip6-chain3.pcap"), [v6pkt(chain3, 0)], link=LINK_ETHER)
+    write_pcap(p("ip6-unknown-nh.pcap"),
+               [eth(ip6(b"\xde\xad\xbe\xef" * 4, nxt=253, src=IP6_A,
+                        dst=IP6_B), ETH_IP6)], link=LINK_ETHER)
+
     v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
                           src=IP6_A, dst=IP6_B)
     bare6 = [fr[14:] for fr in v6conv]

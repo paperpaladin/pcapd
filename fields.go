@@ -111,6 +111,22 @@ func init() {
 	reg("ipv6.src", v6(func(f *Frame) string { return net.IP(f.Src).String() }))
 	reg("ipv6.dst", v6(func(f *Frame) string { return net.IP(f.Dst).String() }))
 
+	reg("ipv6.hopopts.nxt", ext(0, func(e ExtHdr) string { return fmt.Sprint(e.Nxt) }))
+	reg("ipv6.hopopts.len", ext(0, func(e ExtHdr) string { return fmt.Sprint(e.Len) }))
+	reg("ipv6.hopopts.len_oct", ext(0, func(e ExtHdr) string { return fmt.Sprint(e.LenOct) }))
+	reg("ipv6.dstopts.nxt", ext(60, func(e ExtHdr) string { return fmt.Sprint(e.Nxt) }))
+	reg("ipv6.dstopts.len", ext(60, func(e ExtHdr) string { return fmt.Sprint(e.Len) }))
+	reg("ipv6.dstopts.len_oct", ext(60, func(e ExtHdr) string { return fmt.Sprint(e.LenOct) }))
+	reg("ipv6.routing.nxt", ext(43, func(e ExtHdr) string { return fmt.Sprint(e.Nxt) }))
+	reg("ipv6.routing.len", ext(43, func(e ExtHdr) string { return fmt.Sprint(e.Len) }))
+	reg("ipv6.routing.len_oct", ext(43, func(e ExtHdr) string { return fmt.Sprint(e.LenOct) }))
+	reg("ipv6.routing.type", ext(43, func(e ExtHdr) string { return fmt.Sprint(e.RtType) }))
+	reg("ipv6.routing.segleft", ext(43, func(e ExtHdr) string { return fmt.Sprint(e.SegLeft) }))
+	reg("ipv6.fraghdr.nxt", ext(44, func(e ExtHdr) string { return fmt.Sprint(e.Nxt) }))
+	reg("ipv6.fraghdr.offset", ext(44, func(e ExtHdr) string { return fmt.Sprint(e.FragOff) }))
+	reg("ipv6.fraghdr.more", ext(44, func(e ExtHdr) string { return boolStr(b2i(e.More)) }))
+	reg("ipv6.fraghdr.ident", ext(44, func(e ExtHdr) string { return fmt.Sprintf("0x%08x", e.Ident) }))
+
 	reg("tcp.srcport", tc(func(f *Frame) string { return fmt.Sprint(f.SPort) }))
 	reg("tcp.dstport", tc(func(f *Frame) string { return fmt.Sprint(f.DPort) }))
 	reg("tcp.seq_raw", tc(func(f *Frame) string { return fmt.Sprint(f.Seq) }))
@@ -167,6 +183,30 @@ func tag(tpid uint16, fn func(VLANTag) string) fieldFn {
 		}
 		return strings.Join(out, ",")
 	}
+}
+
+// ext answers for every extension header of one protocol number, joined
+// with commas as tshark joins repeated occurrences.
+func ext(proto uint8, fn func(ExtHdr) string) fieldFn {
+	return func(f *Frame) string {
+		var out []string
+		for _, e := range f.ExtHdrs {
+			if e.Proto == proto {
+				out = append(out, fn(e))
+			}
+		}
+		if len(out) == 0 {
+			return absent(f)
+		}
+		return strings.Join(out, ",")
+	}
+}
+
+func b2i(v bool) uint8 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func boolStr(v uint8) string {

@@ -52,6 +52,9 @@ type Frame struct {
 	NextHdr  uint8
 	HopLimit uint8
 
+	// IPv6 extension headers, in the order they appeared.
+	ExtHdrs []ExtHdr
+
 	Src []byte
 	Dst []byte
 
@@ -88,6 +91,20 @@ type VLANTag struct {
 	DEI   uint8
 	VID   uint16
 	Inner uint16
+}
+
+// ExtHdr is one IPv6 extension header. Len is the raw length field, whose
+// units differ between header types; LenOct is the whole header in bytes.
+type ExtHdr struct {
+	Proto   uint8
+	Nxt     uint8
+	Len     uint8
+	LenOct  int
+	RtType  uint8
+	SegLeft uint8
+	FragOff uint16
+	More    bool
+	Ident   uint32
 }
 
 func (f *Frame) refuse(format string, a ...any) {
@@ -372,7 +389,75 @@ func (f *Frame) decodeIPv6(c *cursor) {
 	if avail > wire {
 		avail = wire
 	}
-	f.decodeTransport(c, f.NextHdr, wire, avail)
+	proto := f.NextHdr
+	// Walk the extension header chain. Each step must consume at least
+	// eight bytes, so the loop cannot spin, and the chain is capped at a
+	// length no real packet reaches because an attacker-supplied chain is
+	// otherwise bounded only by the MTU.
+	for len(f.ExtHdrs) < 32 && isChainHdr(proto) {
+		e := ExtHdr{Proto: proto}
+		switch proto {
+		case 44: // fragment: fixed eight bytes, no length field
+			e.Nxt = c.u8()
+			c.u8()
+			ff := c.u16()
+			e.Ident = c.u32()
+			e.FragOff = ff >> 3
+			e.More = ff&1 != 0
+			e.LenOct = 8
+		case 51: // authentication header: length in four-byte units, plus two
+			e.Nxt = c.u8()
+			e.Len = c.u8()
+			e.LenOct = (int(e.Len) + 2) * 4
+			c.skip(e.LenOct - 2)
+		default: // hop-by-hop, routing, destination options, mobility
+			e.Nxt = c.u8()
+			e.Len = c.u8()
+			e.LenOct = (int(e.Len) + 1) * 8
+			if proto == 43 {
+				e.RtType = c.u8()
+				e.SegLeft = c.u8()
+				c.skip(e.LenOct - 4)
+			} else {
+				c.skip(e.LenOct - 2)
+			}
+		}
+		if !c.ok() {
+			f.refuse("ipv6 extension header %d: %v", proto, c.err)
+			return
+		}
+		if e.LenOct > wire {
+			f.refuse("ipv6 extension header %d claims %d bytes with %d left in the payload", proto, e.LenOct, wire)
+			return
+		}
+		f.ExtHdrs = append(f.ExtHdrs, e)
+		wire -= e.LenOct
+		avail -= e.LenOct
+		if avail < 0 {
+			avail = 0
+		}
+		if proto == 44 && (e.FragOff != 0 || e.More) {
+			f.refuse("fragmented ipv6 datagram: reassembly not implemented")
+			return
+		}
+		proto = e.Nxt
+	}
+	if isChainHdr(proto) {
+		f.refuse("ipv6 extension header chain longer than 32 headers")
+		return
+	}
+	f.decodeTransport(c, proto, wire, avail)
+}
+
+// isChainHdr reports whether a next-header value introduces another header
+// we can walk past. ESP is deliberately absent: what follows it is
+// encrypted, so the chain genuinely stops there.
+func isChainHdr(p uint8) bool {
+	switch p {
+	case 0, 43, 44, 51, 60, 135:
+		return true
+	}
+	return false
 }
 
 // decodeTransport reads the transport header. wire is the number of payload
