@@ -138,6 +138,13 @@ func init() {
 	reg("tcp.urgent_pointer", tc(func(f *Frame) string { return fmt.Sprint(f.UrgPtr) }))
 	reg("tcp.len", tc(func(f *Frame) string { return fmt.Sprint(f.TCPLen) }))
 
+	reg("tcp.options.mss_val", tc(func(f *Frame) string { return joinU16(f, f.MSS) }))
+	reg("tcp.options.wscale.shift", tc(func(f *Frame) string { return joinU8(f, f.WScale) }))
+	reg("tcp.options.timestamp.tsval", tc(func(f *Frame) string { return joinU32(f, f.TSval) }))
+	reg("tcp.options.timestamp.tsecr", tc(func(f *Frame) string { return joinU32(f, f.TSecr) }))
+	reg("tcp.options.sack_le", tc(func(f *Frame) string { return joinEdges(f, 0) }))
+	reg("tcp.options.sack_re", tc(func(f *Frame) string { return joinEdges(f, 1) }))
+
 	reg("udp.srcport", ud(func(f *Frame) string { return fmt.Sprint(f.SPort) }))
 	reg("udp.dstport", ud(func(f *Frame) string { return fmt.Sprint(f.DPort) }))
 	reg("udp.length", ud(func(f *Frame) string { return fmt.Sprint(f.ULen) }))
@@ -200,6 +207,53 @@ func ext(proto uint8, fn func(ExtHdr) string) fieldFn {
 		}
 		return strings.Join(out, ",")
 	}
+}
+
+func joinU16(f *Frame, v []uint16) string {
+	if len(v) == 0 {
+		return absent(f)
+	}
+	out := make([]string, len(v))
+	for i, x := range v {
+		out[i] = fmt.Sprint(x)
+	}
+	return strings.Join(out, ",")
+}
+
+func joinU8(f *Frame, v []uint8) string {
+	if len(v) == 0 {
+		return absent(f)
+	}
+	out := make([]string, len(v))
+	for i, x := range v {
+		out[i] = fmt.Sprint(x)
+	}
+	return strings.Join(out, ",")
+}
+
+func joinU32(f *Frame, v []uint32) string {
+	if len(v) == 0 {
+		return absent(f)
+	}
+	out := make([]string, len(v))
+	for i, x := range v {
+		out[i] = fmt.Sprint(x)
+	}
+	return strings.Join(out, ",")
+}
+
+// SACK edges alternate left, right. parity 0 picks the left edges.
+func joinEdges(f *Frame, parity int) string {
+	var out []string
+	for i, e := range f.SACKEdges {
+		if i%2 == parity {
+			out = append(out, fmt.Sprint(e))
+		}
+	}
+	if len(out) == 0 {
+		return absent(f)
+	}
+	return strings.Join(out, ",")
 }
 
 func b2i(v bool) uint8 {

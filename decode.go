@@ -74,6 +74,17 @@ type Frame struct {
 	TOpts   []byte
 	TCPLen  int // segment length from the network header, not from the capture
 
+	// TCP options, decoded. Kinds lists every option kind in the order
+	// they appeared, including the ones we do not interpret, because the
+	// corpus construct counter needs to know which ones were exercised.
+	TOptKinds []uint8
+	MSS       []uint16
+	WScale    []uint8
+	SACKPerm  bool
+	SACKEdges []uint32
+	TSval     []uint32
+	TSecr     []uint32
+
 	ULen   uint16
 	UCksum uint16
 
@@ -524,10 +535,60 @@ func (f *Frame) decodeTCP(c *cursor, wire, avail int) {
 			return
 		}
 		f.TOpts = c.take(n)
+		f.decodeTCPOptions(f.TOpts)
 	}
 	f.HasTCP = true
 	f.TCPLen = wire - f.DataOff
 	f.Payload = clamp(c, avail-f.DataOff)
+}
+
+// decodeTCPOptions walks the option list. Kinds 0 and 1 are one byte; every
+// other kind carries its own length, and a length below two would not
+// advance, so it ends the list rather than looping. A malformed option list
+// is not an error for the packet: tshark reports what it could read and so
+// do we.
+func (f *Frame) decodeTCPOptions(b []byte) {
+	for i := 0; i < len(b); {
+		kind := b[i]
+		f.TOptKinds = append(f.TOptKinds, kind)
+		if kind == 0 { // end of option list
+			return
+		}
+		if kind == 1 { // no-op
+			i++
+			continue
+		}
+		if i+1 >= len(b) {
+			return
+		}
+		l := int(b[i+1])
+		if l < 2 || i+l > len(b) {
+			return
+		}
+		v := b[i+2 : i+l]
+		switch kind {
+		case 2:
+			if len(v) == 2 {
+				f.MSS = append(f.MSS, be16(v))
+			}
+		case 3:
+			if len(v) == 1 {
+				f.WScale = append(f.WScale, v[0])
+			}
+		case 4:
+			f.SACKPerm = true
+		case 5:
+			for j := 0; j+4 <= len(v); j += 4 {
+				f.SACKEdges = append(f.SACKEdges, be32(v[j:j+4]))
+			}
+		case 8:
+			if len(v) == 8 {
+				f.TSval = append(f.TSval, be32(v[0:4]))
+				f.TSecr = append(f.TSecr, be32(v[4:8]))
+			}
+		}
+		i += l
+	}
 }
 
 func (f *Frame) decodeUDP(c *cursor, wire, avail int) {

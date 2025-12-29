@@ -44,6 +44,9 @@ FIELDS = [
     "tcp.srcport", "tcp.dstport", "tcp.seq_raw", "tcp.ack_raw", "tcp.hdr_len",
     "tcp.flags", "tcp.window_size_value", "tcp.checksum",
     "tcp.urgent_pointer", "tcp.len",
+    "tcp.options.mss_val", "tcp.options.wscale.shift",
+    "tcp.options.timestamp.tsval", "tcp.options.timestamp.tsecr",
+    "tcp.options.sack_le", "tcp.options.sack_re",
     "udp.srcport", "udp.dstport", "udp.length", "udp.checksum",
 ]
 
