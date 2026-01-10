@@ -98,6 +98,49 @@ done
 echo "     $facts file-level facts over $files files"
 
 echo
+echo "--- what the corpus actually contains ---"
+# A test for overlapping segments run over a corpus with no overlapping
+# segments passes and proves nothing. Every construct the suite claims to
+# exercise is counted here and asserted non-zero. An empty capture file is
+# a valid capture of nothing that every tool in the suite reads happily and
+# agrees about, and this is what notices.
+$PCAPD counts $(corpus_ok) > "$W/counts" || { echo "counts failed" >&2; exit 2; }
+sed 's/^/     /' "$W/counts"
+has() {
+	n=$(awk -F"\t" -v k="$1" '$1==k{print $2}' "$W/counts")
+	[ -n "$n" ] || n=0
+	if [ "$n" -ge "${2:-1}" ]; then
+		ok "corpus has $1 ($n)"
+	else
+		bad "corpus has $1: $n, want at least ${2:-1}"
+	fi
+}
+for k in file.pcap file.pcapng file.bigendian file.nanosecond \
+         link.ether link.linux-sll link.linux-sll2 link.raw link.null link.loop \
+         ip4 ip4.df ip4.fragment ip6 ip6.fragment ip6.exthdr.chain \
+         ip6.exthdr.0 ip6.exthdr.43 ip6.exthdr.44 ip6.exthdr.60 \
+         vlan.tpid.8100 vlan.tpid.88a8 vlan.stacked vlan.dei.set \
+         tcp udp tcp.withdata packet.snapped \
+         tcp.flag.syn tcp.flag.fin tcp.flag.rst tcp.flag.psh \
+         tcp.option.1 tcp.option.2 tcp.option.3 tcp.option.4 tcp.option.8 \
+         ng.block.shb ng.block.idb ng.block.epb; do
+	has "$k"
+done
+
+# Every live capture must hold packets. Three separate scenarios silently
+# produced a 24-byte header and nothing else before tcpdump was told to
+# flush, and the whole suite stayed green through it.
+for f in t/corpus/live/*.pcap; do
+	[ -e "$f" ] || continue
+	n=$($PCAPD info "$f" | sed -n 's/^packets: //p')
+	if [ "$n" -ge 4 ]; then
+		ok "live capture $(basename "$f") has $n packets"
+	else
+		bad "live capture $(basename "$f") has $n packets"
+	fi
+done
+
+echo
 echo "--- per-field values against tshark ---"
 # Per field and per packet, never per file. The totals line is what the
 # README quotes; the per-file lines only appear when something disagrees.

@@ -15,21 +15,41 @@ OUT=$1
 ip link set lo up || exit 2
 ip addr show lo | grep -q 'inet ' || exit 2
 
-# cap FILE FILTER COUNT SCRIPT -- start tcpdump, run a python traffic script,
-# stop tcpdump. The count is a ceiling, not an expectation: tcpdump is killed
-# when the traffic is done.
+# cap FILE FILTER DEVICE SCRIPT... -- start tcpdump, run a python traffic
+# script, stop tcpdump, and insist that something was captured.
+#
+# -U and --immediate-mode are both load-bearing. Without them libpcap holds
+# packets in its ring until the buffer timeout and tcpdump writes them in
+# stdio-sized chunks, and SIGINT then takes the process down with packets
+# still unwritten. The symptom is a 24-byte file: a valid capture of nothing,
+# which every tool in the suite reads happily and agrees about. Three
+# different scenarios produced one of those on three different runs before
+# the flush was forced.
 cap() {
 	f=$1; filt=$2; dev=$3; shift 3
-	tcpdump -i "$dev" -Z root -s 0 -w "$OUT/$f" "$filt" >/dev/null 2>&1 &
-	td=$!
-	# tcpdump needs to have the socket open before the traffic starts.
-	i=0
-	while [ ! -s "$OUT/$f" ] && [ $i -lt 50 ]; do i=$((i+1)); sleep 0.05; done
-	sleep 0.3
-	python3 "$@"
-	sleep 0.4
-	kill -INT $td 2>/dev/null
-	wait $td 2>/dev/null
+	try=0
+	while [ $try -lt 3 ]; do
+		try=$((try+1))
+		rm -f "$OUT/$f"
+		tcpdump -i "$dev" -Z root -s 0 -U --immediate-mode \
+			-w "$OUT/$f" "$filt" >/dev/null 2>&1 &
+		td=$!
+		# tcpdump opens the capture socket before the save file, so the
+		# file appearing means the socket is already listening.
+		i=0
+		while [ ! -s "$OUT/$f" ] && [ $i -lt 100 ]; do i=$((i+1)); sleep 0.05; done
+		sleep 0.3
+		python3 "$@"
+		sleep 0.5
+		kill -INT $td 2>/dev/null
+		wait $td 2>/dev/null
+		# 24 bytes is the file header and no packets.
+		sz=$(wc -c < "$OUT/$f")
+		[ "$sz" -gt 24 ] && return 0
+		echo "retry $f: captured nothing on attempt $try" >&2
+	done
+	echo "giving up on $f after $try attempts" >&2
+	return 1
 }
 
 D=$(dirname "$0")

@@ -71,7 +71,13 @@ def rows(text, n):
 
 
 def compare(path, fields):
-    tcmd = ["tshark", "-r", path, "-T", "fields", "-E", "separator=/t"]
+    # Raw sequence numbers. tshark rewrites tcp.seq and the SACK edges as
+    # offsets from the initial sequence number by default, so a SACK block
+    # reads 229377 where the wire carries 4160109604. We compare what is in
+    # the packet, so the preference is turned off rather than the
+    # subtraction being reimplemented on our side.
+    tcmd = ["tshark", "-o", "tcp.relative_sequence_numbers:FALSE",
+            "-r", path, "-T", "fields", "-E", "separator=/t"]
     for f in fields:
         tcmd += ["-e", f]
     rc, tout, terr = run(tcmd)
