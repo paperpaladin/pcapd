@@ -117,12 +117,17 @@ has() {
 }
 for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          link.ether link.linux-sll link.linux-sll2 link.raw link.null link.loop \
-         ip4 ip4.df ip4.fragment ip6 ip6.fragment ip6.exthdr.chain \
+         ip4 ip4.df ip4.fragment ip4.options ip4.dsfield.nonzero \
+         ip4.fragment.offset13bit \
+         ip6 ip6.fragment ip6.exthdr.chain ip6.tclass.nonzero ip6.flow.nonzero \
          ip6.exthdr.0 ip6.exthdr.43 ip6.exthdr.44 ip6.exthdr.60 \
          vlan.tpid.8100 vlan.tpid.88a8 vlan.stacked vlan.dei.set \
          tcp udp tcp.withdata packet.snapped \
-         tcp.flag.syn tcp.flag.fin tcp.flag.rst tcp.flag.psh \
-         tcp.option.1 tcp.option.2 tcp.option.3 tcp.option.4 tcp.option.8 \
+         tcp.flag.syn tcp.flag.fin tcp.flag.rst tcp.flag.psh tcp.flag.ack \
+         tcp.flag.urg tcp.flag.ece tcp.flag.cwr tcp.flag.ns tcp.window.zero \
+         udp.checksum.zero \
+         tcp.option.0 tcp.option.1 tcp.option.2 tcp.option.3 tcp.option.4 \
+         tcp.option.5 tcp.option.8 \
          ng.block.shb ng.block.idb ng.block.epb; do
 	has "$k"
 done

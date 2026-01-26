@@ -132,7 +132,11 @@ def tcp(payload=b"", sport=1234, dport=80, seq=0, ack=0, flags=ACK,
     while len(opts) % 4:
         opts += b"\x00"
     off = (20 + len(opts)) // 4 if doff is None else doff
-    hdr = struct.pack(">HHIIBBHHH", sport, dport, seq, ack, off << 4, flags,
+    # The ninth flag bit (NS, RFC 3540) lives in the low bit of the byte
+    # that also holds the data offset, so flags above 0xff are split here
+    # rather than being rejected.
+    hdr = struct.pack(">HHIIBBHHH", sport, dport, seq, ack,
+                      (off << 4) | ((flags >> 8) & 1), flags & 0xFF,
                       window, 0, urg) + opts
     seg = hdr + payload
     ck = _l4_cksum(seg, 6, src, dst, v6) ^ (0xFFFF if bad_cksum else 0)
@@ -140,11 +144,15 @@ def tcp(payload=b"", sport=1234, dport=80, seq=0, ack=0, flags=ACK,
 
 
 def udp(payload=b"", sport=1234, dport=53, src=IP_A, dst=IP_B, v6=False,
-        length=None):
+        length=None, cksum=None):
     ln = 8 + len(payload) if length is None else length
     seg = struct.pack(">HHHH", sport, dport, ln, 0) + payload
-    ck = _l4_cksum(seg, 17, src, dst, v6)
-    return seg[:6] + struct.pack(">H", ck or 0xFFFF) + seg[8:]
+    if cksum is None:
+        # A zero checksum means "not computed" in IPv4 UDP, so a real zero
+        # result is transmitted as 0xffff. Passing cksum=0 writes the
+        # not-computed value on purpose.
+        cksum = _l4_cksum(seg, 17, src, dst, v6) or 0xFFFF
+    return seg[:6] + struct.pack(">H", cksum) + seg[8:]
 
 
 def _l4_cksum(seg, proto, src, dst, v6):
@@ -328,6 +336,40 @@ def main(outdir):
     write_pcap(p("ip6-unknown-nh.pcap"),
                [eth(ip6(b"\xde\xad\xbe\xef" * 4, nxt=253, src=IP6_A,
                         dst=IP6_B), ETH_IP6)], link=LINK_ETHER)
+
+    # Gaps the construct counter reported as zero. Each of these exists
+    # because nothing in the live corpus reaches it, not because it seemed
+    # like a nice idea.
+    rr = bytes([7, 7, 4]) + b"\x00" * 4 + b"\x00"      # record route, padded
+    write_pcap(p("ip4-options.pcap"),
+               [eth(ip4(tcp(b"opt", seq=1, ack=1), opts=rr))])
+    write_pcap(p("ip4-dscp.pcap"),
+               [eth(ip4(tcp(b"ef", seq=1, ack=1), dscp=0xB8))])
+    # A fragment offset above 4095, which needs 13 bits of the field. A
+    # corpus whose offsets all fit in 12 bits cannot see a narrowed mask.
+    write_pcap(p("ip4-fragoff13.pcap"),
+               [eth(ip4(b"\xaa" * 64, ident=0x7777, mf=False, frag=40000))])
+    write_pcap(p("ip6-tclass.pcap"),
+               [eth(ip6(tcp(b"tc", seq=1, ack=1, src=IP6_A, dst=IP6_B, v6=True),
+                        tclass=0xB8, flow=0xABCDE, src=IP6_A, dst=IP6_B),
+                    ETH_IP6)])
+    write_pcap(p("udp-nocksum.pcap"),
+               [eth(ip4(udp(b"no checksum here", cksum=0), proto=17))])
+    write_pcap(p("tcp-urg.pcap"),
+               [eth(ip4(tcp(b"urgent!", seq=1, ack=1, flags=URG | PSH | ACK,
+                            urg=4)))])
+    write_pcap(p("tcp-ecn.pcap"),
+               [eth(ip4(tcp(b"", seq=1, ack=1, flags=SYN | ECE | CWR))),
+                eth(ip4(tcp(b"", seq=2, ack=1, flags=ACK | 0x100)))])
+    # An option list with end-of-list padding and two SACK blocks, which
+    # loopback traffic only produces when it happens to lose a segment.
+    sackopt = (bytes([1, 1, 5, 18])
+               + struct.pack(">IIII", 2000, 3000, 5000, 6000)
+               + bytes([0, 0]))
+    write_pcap(p("tcp-sack.pcap"),
+               [eth(ip4(tcp(b"", seq=1, ack=1, opts=sackopt)))])
+    write_pcap(p("tcp-zerowin.pcap"),
+               [eth(ip4(tcp(b"", seq=1, ack=1, window=0)))])
 
     v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
                           src=IP6_A, dst=IP6_B)
