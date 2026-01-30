@@ -31,6 +31,10 @@ type Packet struct {
 	LinkType uint32
 	Iface    int
 	Data     []byte
+	// HasTS is false for a pcapng simple packet block, which carries no
+	// timestamp at all. Reporting zero for it would be a timestamp of
+	// 1 January 1970 presented as a fact.
+	HasTS bool
 }
 
 // Iface is a capture interface. Classic pcap has exactly one, implied by the
@@ -144,6 +148,7 @@ func readPcap(b []byte) (*Capture, error) {
 		f.Packets = append(f.Packets, Packet{
 			Num: n, TsSec: int64(sec), TsNsec: ns,
 			CapLen: inclLen, OrigLen: origLen, LinkType: link, Iface: 0, Data: data,
+			HasTS: true,
 		})
 	}
 	return f, nil

@@ -128,7 +128,10 @@ for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          udp.checksum.zero \
          tcp.option.0 tcp.option.1 tcp.option.2 tcp.option.3 tcp.option.4 \
          tcp.option.5 tcp.option.8 \
-         ng.block.shb ng.block.idb ng.block.epb; do
+         ng.block.shb ng.block.idb ng.block.epb ng.block.spb ng.block.nrb \
+         ng.block.isb ng.block.dsb ng.block.unknown-0x12345678 \
+         ng.sections.multiple ng.interfaces.multiple ng.tsresol.unusual \
+         ng.tsoffset ng.nameresolution.records; do
 	has "$k"
 done
 

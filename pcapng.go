@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"math/bits"
 )
 
 // pcapng. Everything in the file is a block: a type, a length, a body, and
@@ -180,7 +181,7 @@ func (f *Capture) block(btype uint32, c *cursor, be bool, n *int) error {
 		if _, err := readOptions(c, "enhanced packet"); err != nil {
 			return err
 		}
-		return f.addPacket(int(id), uint64(hi)<<32|uint64(lo), capLen, origLen, data, n)
+		return f.addPacket(int(id), uint64(hi)<<32|uint64(lo), capLen, origLen, data, n, true)
 	case blkSPB:
 		origLen := c.u32()
 		if !c.ok() {
@@ -197,7 +198,7 @@ func (f *Capture) block(btype uint32, c *cursor, be bool, n *int) error {
 		if !c.ok() {
 			return fmt.Errorf("pcapng: simple packet block: %w", c.err)
 		}
-		return f.addPacket(0, 0, capLen, origLen, data, n)
+		return f.addPacket(0, 0, capLen, origLen, data, n, false)
 	case blkNRB:
 		return f.nameRecords(c)
 	case blkISB, blkDSB, blkCB1, blkCB2:
@@ -210,7 +211,7 @@ func (f *Capture) block(btype uint32, c *cursor, be bool, n *int) error {
 	return nil
 }
 
-func (f *Capture) addPacket(iface int, ts uint64, capLen, origLen uint32, data []byte, n *int) error {
+func (f *Capture) addPacket(iface int, ts uint64, capLen, origLen uint32, data []byte, n *int, hasTS bool) error {
 	if iface >= len(f.Ifaces) {
 		return fmt.Errorf("pcapng: packet names interface %d, but only %d have been described", iface, len(f.Ifaces))
 	}
@@ -218,16 +219,21 @@ func (f *Capture) addPacket(iface int, ts uint64, capLen, origLen uint32, data [
 	*n++
 	sec := int64(ts/in.TsDiv) + int64(in.TsOffset)
 	frac := ts % in.TsDiv
-	// Scale the fraction to nanoseconds. Multiplying first would overflow
-	// for a resolution finer than nanoseconds, which if_tsresol allows.
+	// Scale the fraction to nanoseconds. Dividing 1e9 by the resolution
+	// first loses the remainder, which for a power-of-two resolution is
+	// most of the answer: at 2^-10 seconds one tick is 976562.5 ns and
+	// truncating the scale factor makes every timestamp slightly early.
+	// The 128-bit multiply keeps it exact. frac is always below TsDiv, so
+	// the quotient is below 1e9 and Div64 cannot overflow.
 	var ns uint64
 	if in.TsDiv <= 1000000000 {
-		ns = frac * (1000000000 / in.TsDiv)
+		hi, lo := bits.Mul64(frac, 1000000000)
+		ns, _ = bits.Div64(hi, lo, in.TsDiv)
 	} else {
 		ns = frac / (in.TsDiv / 1000000000)
 	}
 	f.Packets = append(f.Packets, Packet{
-		Num: *n, TsSec: sec, TsNsec: uint32(ns),
+		Num: *n, TsSec: sec, TsNsec: uint32(ns), HasTS: hasTS,
 		CapLen: capLen, OrigLen: origLen, LinkType: in.LinkType, Iface: iface, Data: data,
 	})
 	return nil

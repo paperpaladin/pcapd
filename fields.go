@@ -33,6 +33,11 @@ func init() {
 	reg("frame.len", func(f *Frame) string { return fmt.Sprint(f.Pkt.OrigLen) })
 	reg("frame.cap_len", func(f *Frame) string { return fmt.Sprint(f.Pkt.CapLen) })
 	reg("frame.time_epoch", func(f *Frame) string {
+		// A simple packet block has no timestamp. Printing zero would be
+		// 1 January 1970 presented as a measurement.
+		if !f.Pkt.HasTS {
+			return ""
+		}
 		return fmt.Sprintf("%d.%09d", f.Pkt.TsSec, f.Pkt.TsNsec)
 	})
 	reg("frame.interface_id", func(f *Frame) string { return fmt.Sprint(f.Pkt.Iface) })

@@ -194,6 +194,69 @@ def block(btype, body, big=False):
             + b"\x00" * ((-len(body)) % 4) + struct.pack(e + "I", total))
 
 
+# --- pcapng at block level -------------------------------------------
+#
+# write_pcapng above is the convenience form. These build one block at a
+# time, because the interesting pcapng files are the ones whose block
+# sequence is unusual and no writer on this machine produces them.
+
+
+def ng_shb(big=False, opts=b""):
+    e = ">" if big else "<"
+    return block(0x0A0D0D0A, struct.pack(e + "IHHq", 0x1A2B3C4D, 1, 0, -1) + opts,
+                 big)
+
+
+def ng_idb(link=LINK_ETHER, snaplen=262144, big=False, opts=None, name="if0",
+           tsresol=6, tsoffset=None):
+    e = ">" if big else "<"
+    if opts is None:
+        opts = _opt(e, 2, name.encode()) + _opt(e, 9, bytes([tsresol]))
+        if tsoffset is not None:
+            opts += _opt(e, 14, struct.pack(e + "Q", tsoffset))
+        opts += _opt(e, 0, b"")
+    return block(0x00000001, struct.pack(e + "HHI", link, 0, snaplen) + opts, big)
+
+
+def ng_epb(data, ts=0, ifid=0, origlen=None, big=False, opts=b""):
+    e = ">" if big else "<"
+    ol = len(data) if origlen is None else origlen
+    body = (struct.pack(e + "IIIII", ifid, ts >> 32, ts & 0xFFFFFFFF,
+                        len(data), ol)
+            + data + b"\x00" * ((-len(data)) % 4) + opts)
+    return block(0x00000006, body, big)
+
+
+def ng_spb(data, origlen=None, big=False):
+    e = ">" if big else "<"
+    ol = len(data) if origlen is None else origlen
+    return block(0x00000003,
+                 struct.pack(e + "I", ol) + data + b"\x00" * ((-len(data)) % 4),
+                 big)
+
+
+def ng_nrb(records, big=False):
+    """records is a list of (type, address bytes, [names])."""
+    e = ">" if big else "<"
+    body = b""
+    for typ, addr, names in records:
+        v = addr + b"".join(n.encode() + b"\x00" for n in names)
+        body += struct.pack(e + "HH", typ, len(v)) + v + b"\x00" * ((-len(v)) % 4)
+    body += struct.pack(e + "HH", 0, 0)
+    return block(0x00000004, body, big)
+
+
+def ng_isb(ifid=0, ts=0, big=False):
+    e = ">" if big else "<"
+    body = struct.pack(e + "III", ifid, ts >> 32, ts & 0xFFFFFFFF)
+    body += _opt(e, 0, b"")
+    return block(0x00000005, body, big)
+
+
+def ng_unknown(btype, body=b"\x00" * 8, big=False):
+    return block(btype, body, big)
+
+
 def write_pcapng(path, frames, link=LINK_ETHER, big=False, snaplen=262144,
                  tsresol=6, ifaces=None, t0=1700000000):
     e = ">" if big else "<"
@@ -370,6 +433,59 @@ def main(outdir):
                [eth(ip4(tcp(b"", seq=1, ack=1, opts=sackopt)))])
     write_pcap(p("tcp-zerowin.pcap"),
                [eth(ip4(tcp(b"", seq=1, ack=1, window=0)))])
+
+    # pcapng block sequences no writer here produces. editcap always emits
+    # section header, one interface description, then enhanced packet
+    # blocks, so everything else in the format is dead code without these.
+    bare_eth = basic
+    blocks = [ng_shb(), ng_idb(snaplen=128)]
+    blocks += [ng_spb(fr[:128], origlen=len(fr)) for fr in bare_eth]
+    _write(p("ng-spb.pcapng"), b"".join(blocks))
+
+    blocks = [ng_shb(), ng_idb()]
+    blocks += [ng_epb(fr, ts=1700000000000000 + i) for i, fr in enumerate(bare_eth)]
+    blocks.append(ng_nrb([(1, ip4addr("10.0.0.1"), ["alpha", "alpha.example"]),
+                          (1, ip4addr("10.0.0.2"), ["beta"]),
+                          (2, ip6addr("fd00::1"), ["gamma"])]))
+    blocks.append(ng_isb(0, 1700000000000100))
+    _write(p("ng-nrb-isb.pcapng"), b"".join(blocks))
+
+    # Two sections, the second in the other byte order, each with its own
+    # interface. A reader that fixes the byte order once cannot read this.
+    blocks = [ng_shb(), ng_idb(), ng_epb(bare_eth[0], ts=1700000000000000)]
+    blocks += [ng_shb(big=True), ng_idb(big=True),
+               ng_epb(bare_eth[1], ts=1700000000000000, big=True)]
+    _write(p("ng-twosections.pcapng"), b"".join(blocks))
+
+    # Two interfaces with different link types in one section.
+    blocks = [ng_shb(), ng_idb(link=LINK_ETHER, name="eth0"),
+              ng_idb(link=LINK_RAW, name="tun0")]
+    for i, fr in enumerate(bare_eth):
+        blocks.append(ng_epb(fr, ts=1700000000000000 + i, ifid=0))
+        blocks.append(ng_epb(fr[14:], ts=1700000000000000 + i, ifid=1))
+    _write(p("ng-twoifaces.pcapng"), b"".join(blocks))
+
+    # Timestamp resolutions other than microseconds: decimal nanoseconds,
+    # and the power-of-two form, which almost nothing writes.
+    blocks = [ng_shb(), ng_idb(tsresol=9)]
+    blocks += [ng_epb(fr, ts=1700000000123456789 + i * 1000)
+               for i, fr in enumerate(bare_eth)]
+    _write(p("ng-tsresol9.pcapng"), b"".join(blocks))
+    blocks = [ng_shb(), ng_idb(tsresol=0x8A)]  # 2^-10 seconds
+    blocks += [ng_epb(fr, ts=1700000000 * 1024 + i)
+               for i, fr in enumerate(bare_eth)]
+    _write(p("ng-tsresol-pow2.pcapng"), b"".join(blocks))
+    blocks = [ng_shb(), ng_idb(tsresol=6, tsoffset=1000000)]
+    blocks += [ng_epb(fr, ts=700000000000000 + i)
+               for i, fr in enumerate(bare_eth)]
+    _write(p("ng-tsoffset.pcapng"), b"".join(blocks))
+
+    # A block type nobody knows, which must be skipped by its length.
+    blocks = [ng_shb(), ng_idb(), ng_unknown(0x12345678, b"opaque!\x00"),
+              ng_epb(bare_eth[0], ts=1700000000000000),
+              ng_unknown(0x0000000A, b"\x00" * 16),
+              ng_epb(bare_eth[1], ts=1700000000000001)]
+    _write(p("ng-unknown-block.pcapng"), b"".join(blocks))
 
     v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
                           src=IP6_A, dst=IP6_B)
