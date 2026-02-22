@@ -33,6 +33,7 @@ FIELDS = [
     "sll.src.eth",
     "ip.version", "ip.hdr_len", "ip.dsfield", "ip.len", "ip.id", "ip.flags",
     "ip.frag_offset", "ip.ttl", "ip.proto", "ip.checksum", "ip.src", "ip.dst",
+    "ip.reassembled.length", "ipv6.reassembled.length",
     "ipv6.version", "ipv6.tclass", "ipv6.flow", "ipv6.plen", "ipv6.nxt",
     "ipv6.hlim", "ipv6.src", "ipv6.dst",
     "ipv6.hopopts.nxt", "ipv6.hopopts.len", "ipv6.hopopts.len_oct",
@@ -46,8 +47,9 @@ FIELDS = [
     "tcp.urgent_pointer", "tcp.len",
     "tcp.options.mss_val", "tcp.options.wscale.shift",
     "tcp.options.timestamp.tsval", "tcp.options.timestamp.tsecr",
-    "tcp.options.sack_le", "tcp.options.sack_re",
+    "tcp.options.sack_le", "tcp.options.sack_re", "tcp.payload",
     "udp.srcport", "udp.dstport", "udp.length", "udp.checksum",
+    "udp.payload",
 ]
 
 PCAPD = os.environ.get("PCAPD", "./pcapd")
@@ -57,6 +59,19 @@ MAXSHOW = int(os.environ.get("MAXSHOW", "12"))
 def run(cmd):
     p = subprocess.run(cmd, capture_output=True)
     return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+
+def clip(s, n=72):
+    return repr(s) if len(s) <= n else repr(s[:n]) + "...(%d)" % len(s)
+
+
+def firstdiff(a, b):
+    for i in range(min(len(a), len(b))):
+        if a[i] != b[i]:
+            return " first difference at offset %d" % i
+    if len(a) != len(b):
+        return " lengths %d and %d" % (len(a), len(b))
+    return ""
 
 
 def rows(text, n):
@@ -108,8 +123,12 @@ def compare(path, fields):
             else:
                 differ += 1
                 if len(shown) < MAXSHOW:
-                    shown.append("    packet %d %s: tshark %r pcapd %r"
-                                 % (i + 1, name, a[j], b[j]))
+                    # Payload fields run to thousands of hex digits and a
+                    # full pair fills a screen with bytes that agree. Show
+                    # the head of each side and where they first differ.
+                    shown.append("    packet %d %s: tshark %s pcapd %s%s"
+                                 % (i + 1, name, clip(a[j]), clip(b[j]),
+                                    firstdiff(a[j], b[j])))
     return (same, differ, refused, declined, shown), None
 
 

@@ -66,14 +66,18 @@ func (c *counter) countFile(path string) {
 		}
 	}
 	c.add("ng.nameresolution.records", len(cap.Names))
+	sess := NewSession()
 	for i := range cap.Packets {
 		p := &cap.Packets[i]
 		c.hit("packet")
 		if p.CapLen < p.OrigLen {
 			c.hit("packet.snapped")
 		}
-		f := decode(p)
+		f := decodeIn(sess, p)
 		c.countFrame(f)
+	}
+	for k, v := range sess.Stats {
+		c.add(k, v)
 	}
 }
 

@@ -130,6 +130,8 @@ for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          tcp.option.5 tcp.option.8 \
          ng.block.shb ng.block.idb ng.block.epb ng.block.spb ng.block.nrb \
          ng.block.isb ng.block.dsb ng.block.unknown-0x12345678 \
+         ipfrag.reassembled ipfrag.overlap ipfrag.conflict ipfrag.gap \
+         ipfrag.oversize \
          ng.sections.multiple ng.interfaces.multiple ng.tsresol.unusual \
          ng.tsoffset ng.nameresolution.records; do
 	has "$k"

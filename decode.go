@@ -11,6 +11,11 @@ import "fmt"
 type Frame struct {
 	Pkt  *Packet
 	Link uint32
+	sess *Session
+
+	// Reasm is the length of the reassembled datagram, set only on the
+	// fragment that completed it, which is where tshark reports it too.
+	Reasm int
 
 	HasEth  bool
 	EthDst  []byte
@@ -136,8 +141,12 @@ const (
 	dltSLL2  = 276
 )
 
-func decode(p *Packet) *Frame {
-	f := &Frame{Pkt: p, Link: p.LinkType}
+// decode reads one packet with no cross-packet state. Anything that needs
+// state, such as fragment reassembly, is refused rather than guessed at.
+func decode(p *Packet) *Frame { return decodeIn(nil, p) }
+
+func decodeIn(s *Session, p *Packet) *Frame {
+	f := &Frame{Pkt: p, Link: p.LinkType, sess: s}
 	c := newCursor(p.Data, true)
 	switch p.LinkType {
 	case dltEther:
@@ -367,7 +376,25 @@ func (f *Frame) decodeIPv4(c *cursor) {
 		avail = wire
 	}
 	if f.Flags&0x01 != 0 || f.FragOff != 0 {
-		f.refuse("fragmented ipv4 datagram: reassembly not implemented")
+		if f.sess == nil {
+			f.refuse("fragmented ipv4 datagram: no reassembly state in this mode")
+			return
+		}
+		data := clamp(c, avail)
+		if len(data) != wire {
+			// A fragment whose bytes were cut off by the snaplen cannot
+			// contribute: filling the hole with what we have would
+			// invent the rest.
+			f.refuse("fragment holds %d of %d bytes: the capture is snapped", len(data), wire)
+			return
+		}
+		full, proto, ok := f.sess.addFragment(f, int(f.FragOff)*8, f.Flags&0x01 != 0, uint32(f.ID), f.IPProto, data)
+		if !ok {
+			return
+		}
+		f.Reasm = len(full)
+		rc := newCursor(full, true)
+		f.decodeTransport(rc, proto, len(full), len(full))
 		return
 	}
 	f.decodeTransport(c, f.IPProto, wire, avail)
@@ -448,7 +475,22 @@ func (f *Frame) decodeIPv6(c *cursor) {
 			avail = 0
 		}
 		if proto == 44 && (e.FragOff != 0 || e.More) {
-			f.refuse("fragmented ipv6 datagram: reassembly not implemented")
+			if f.sess == nil {
+				f.refuse("fragmented ipv6 datagram: no reassembly state in this mode")
+				return
+			}
+			data := clamp(c, avail)
+			if len(data) != wire {
+				f.refuse("fragment holds %d of %d bytes: the capture is snapped", len(data), wire)
+				return
+			}
+			full, proto2, ok := f.sess.addFragment(f, int(e.FragOff)*8, e.More, e.Ident, e.Nxt, data)
+			if !ok {
+				return
+			}
+			f.Reasm = len(full)
+			rc := newCursor(full, true)
+			f.decodeTransport(rc, proto2, len(full), len(full))
 			return
 		}
 		proto = e.Nxt

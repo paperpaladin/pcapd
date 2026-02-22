@@ -487,6 +487,44 @@ def main(outdir):
               ng_epb(bare_eth[1], ts=1700000000000001)]
     _write(p("ng-unknown-block.pcapng"), b"".join(blocks))
 
+    # IPv4 fragmentation by hand. A generator will not produce a gap, a
+    # reversed arrival order or two fragments that disagree about the same
+    # bytes, and those are the cases where reassembly is a policy rather
+    # than an assembly.
+    def frag4(payload, ident, pieces):
+        """pieces is a list of (offset, length, more, fill). fill of None
+        takes the real bytes from payload."""
+        out = []
+        for off, ln, more, fill in pieces:
+            chunk = payload[off:off + ln] if fill is None else bytes([fill]) * ln
+            out.append(eth(ip4(chunk, proto=17, ident=ident, mf=more,
+                               frag=off)))
+        return out
+
+    dgram = udp(bytes(range(256)) * 8, sport=5000, dport=6000)
+    n = len(dgram)
+    assert n == 2056, n
+    whole = [(0, 1024, True, None), (1024, 1024, True, None),
+             (2048, n - 2048, False, None)]
+    write_pcap(p("frag-inorder.pcap"), frag4(dgram, 0x1001, whole))
+    write_pcap(p("frag-reversed.pcap"), frag4(dgram, 0x1002, whole[::-1]))
+    write_pcap(p("frag-gap.pcap"),
+               frag4(dgram, 0x1003, [whole[0], whole[2]]))
+    write_pcap(p("frag-duplicate.pcap"),
+               frag4(dgram, 0x1004, [whole[0], whole[0], whole[1], whole[2]]))
+    # Two fragments covering 1024..2047, the second carrying different
+    # bytes. Whichever reassembly wins, the two possible datagrams differ.
+    conflict = [(0, 1024, True, None), (1024, 1024, True, None),
+                (1024, 1024, True, 0x41), (2048, n - 2048, False, None)]
+    write_pcap(p("frag-conflict.pcap"), frag4(dgram, 0x1005, conflict))
+    same = [(0, 1024, True, None), (1024, 1024, True, None),
+            (512, 1024, True, None), (2048, n - 2048, False, None)]
+    write_pcap(p("frag-overlap-same.pcap"), frag4(dgram, 0x1006, same))
+    # A fragment that claims to end past the 65535-byte ceiling.
+    write_pcap(p("frag-oversize.pcap"),
+               [eth(ip4(b"\x5a" * 600, proto=17, ident=0x1007, mf=True,
+                        frag=65000))])
+
     v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
                           src=IP6_A, dst=IP6_B)
     bare6 = [fr[14:] for fr in v6conv]

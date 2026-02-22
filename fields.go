@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -107,6 +108,19 @@ func init() {
 	reg("ip.src", v4(func(f *Frame) string { return net.IP(f.Src).String() }))
 	reg("ip.dst", v4(func(f *Frame) string { return net.IP(f.Dst).String() }))
 
+	reg("ip.reassembled.length", v4(func(f *Frame) string {
+		if f.Reasm == 0 {
+			return ""
+		}
+		return fmt.Sprint(f.Reasm)
+	}))
+	reg("ipv6.reassembled.length", v6(func(f *Frame) string {
+		if f.Reasm == 0 {
+			return ""
+		}
+		return fmt.Sprint(f.Reasm)
+	}))
+
 	reg("ipv6.version", v6(func(f *Frame) string { return "6" }))
 	reg("ipv6.tclass", v6(func(f *Frame) string { return fmt.Sprintf("0x%08x", f.TClass) }))
 	reg("ipv6.flow", v6(func(f *Frame) string { return fmt.Sprintf("0x%06x", f.Flow) }))
@@ -150,10 +164,16 @@ func init() {
 	reg("tcp.options.sack_le", tc(func(f *Frame) string { return joinEdges(f, 0) }))
 	reg("tcp.options.sack_re", tc(func(f *Frame) string { return joinEdges(f, 1) }))
 
+	// The payload is where a reassembly policy becomes visible. Every
+	// header field of a conflicting fragment pair is identical, so a
+	// comparison that stops at the headers cannot tell which bytes won.
+	reg("tcp.payload", tc(func(f *Frame) string { return hexOrEmpty(f.Payload) }))
+
 	reg("udp.srcport", ud(func(f *Frame) string { return fmt.Sprint(f.SPort) }))
 	reg("udp.dstport", ud(func(f *Frame) string { return fmt.Sprint(f.DPort) }))
 	reg("udp.length", ud(func(f *Frame) string { return fmt.Sprint(f.ULen) }))
 	reg("udp.checksum", ud(func(f *Frame) string { return fmt.Sprintf("0x%04x", f.UCksum) }))
+	reg("udp.payload", ud(func(f *Frame) string { return hexOrEmpty(f.Payload) }))
 }
 
 // absent reports a field as missing, unless the reason it is missing is that
@@ -212,6 +232,13 @@ func ext(proto uint8, fn func(ExtHdr) string) fieldFn {
 		}
 		return strings.Join(out, ",")
 	}
+}
+
+func hexOrEmpty(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return hex.EncodeToString(b)
 }
 
 func joinU16(f *Frame, v []uint16) string {
@@ -375,8 +402,9 @@ func cmdFields(args []string) {
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
 	cols := make([]string, len(fns))
+	sess := NewSession()
 	for i := range c.Packets {
-		f := decode(&c.Packets[i])
+		f := decodeIn(sess, &c.Packets[i])
 		for j, fn := range fns {
 			cols[j] = fn(f)
 		}
