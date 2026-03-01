@@ -167,12 +167,24 @@ func init() {
 	// The payload is where a reassembly policy becomes visible. Every
 	// header field of a conflicting fragment pair is identical, so a
 	// comparison that stops at the headers cannot tell which bytes won.
+	reg("tcp.stream", tc(func(f *Frame) string {
+		if f.StreamIdx < 0 {
+			return refusedMark
+		}
+		return fmt.Sprint(f.StreamIdx)
+	}))
 	reg("tcp.payload", tc(func(f *Frame) string { return hexOrEmpty(f.Payload) }))
 
 	reg("udp.srcport", ud(func(f *Frame) string { return fmt.Sprint(f.SPort) }))
 	reg("udp.dstport", ud(func(f *Frame) string { return fmt.Sprint(f.DPort) }))
 	reg("udp.length", ud(func(f *Frame) string { return fmt.Sprint(f.ULen) }))
 	reg("udp.checksum", ud(func(f *Frame) string { return fmt.Sprintf("0x%04x", f.UCksum) }))
+	reg("udp.stream", ud(func(f *Frame) string {
+		if f.StreamIdx < 0 {
+			return refusedMark
+		}
+		return fmt.Sprint(f.StreamIdx)
+	}))
 	reg("udp.payload", ud(func(f *Frame) string { return hexOrEmpty(f.Payload) }))
 }
 

@@ -130,6 +130,8 @@ for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          tcp.option.5 tcp.option.8 \
          ng.block.shb ng.block.idb ng.block.epb ng.block.spb ng.block.nrb \
          ng.block.isb ng.block.dsb ng.block.unknown-0x12345678 \
+         tcp.overlap tcp.overlap.conflict tcp.retransmission \
+         tcp.outoforder tcp.nohandshake tcp.beforeorigin tcp.snapped \
          ipfrag.reassembled ipfrag.overlap ipfrag.conflict ipfrag.gap \
          ipfrag.oversize \
          ng.sections.multiple ng.interfaces.multiple ng.tsresol.unusual \
@@ -160,6 +162,17 @@ eval "$(echo "$fc" | sed -n 's/^TOTAL //p')"
 eq "tshark fields: nothing disagrees" "differ=0 broken=0" "differ=$differ broken=$broken"
 echo "     $compared values compared over $files files: $same same, $differ differ,"
 echo "     $refused refused (tshark had a value), $declined declined (neither did)"
+
+echo
+echo "--- TCP reassembly against tshark follow,tcp,raw ---"
+# The whole block tshark prints, compared with the whole block pcapd
+# prints, for every stream in every file. Not a normalised version of
+# each: a comparison that rewrites both sides measures the rewriter.
+fo=$(PCAPD=$PCAPD python3 t/followcmp.py $(corpus_ok))
+echo "$fo" | grep -v '^TOTAL'
+eval "$(echo "$fo" | sed -n 's/^TOTAL //p')"
+eq "tshark follow: every stream identical" "differ=0 broken=0" "differ=$differ broken=$broken"
+echo "     $streams streams over $files files, $bytes reassembled bytes, $same identical"
 
 echo
 echo "--- refusals ---"

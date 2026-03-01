@@ -47,9 +47,9 @@ FIELDS = [
     "tcp.urgent_pointer", "tcp.len",
     "tcp.options.mss_val", "tcp.options.wscale.shift",
     "tcp.options.timestamp.tsval", "tcp.options.timestamp.tsecr",
-    "tcp.options.sack_le", "tcp.options.sack_re", "tcp.payload",
+    "tcp.options.sack_le", "tcp.options.sack_re", "tcp.payload", "tcp.stream",
     "udp.srcport", "udp.dstport", "udp.length", "udp.checksum",
-    "udp.payload",
+    "udp.payload", "udp.stream",
 ]
 
 PCAPD = os.environ.get("PCAPD", "./pcapd")

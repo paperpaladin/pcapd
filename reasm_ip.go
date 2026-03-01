@@ -47,6 +47,18 @@ type Session struct {
 	frags map[fragKey]*fragSet
 	// Counters for the construct report.
 	Stats map[string]int
+
+	// TCP streams, in order of first appearance, which is how tshark
+	// numbers tcp.stream.
+	tcpIdx  map[streamKey]*Stream
+	Streams []*Stream
+	// udpIdx numbers UDP conversations the same way.
+	udpIdx   map[streamKey]int
+	UDPCount int
+
+	// OverlapLast selects the other overlap policy: a later segment
+	// replaces bytes already delivered instead of being discarded.
+	OverlapLast bool
 }
 
 func NewSession() *Session {

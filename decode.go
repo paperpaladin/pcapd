@@ -17,6 +17,10 @@ type Frame struct {
 	// fragment that completed it, which is where tshark reports it too.
 	Reasm int
 
+	// StreamIdx is the conversation number, assigned in order of first
+	// appearance. -1 when there is no session to assign one.
+	StreamIdx int
+
 	HasEth  bool
 	EthDst  []byte
 	EthSrc  []byte
@@ -146,7 +150,7 @@ const (
 func decode(p *Packet) *Frame { return decodeIn(nil, p) }
 
 func decodeIn(s *Session, p *Packet) *Frame {
-	f := &Frame{Pkt: p, Link: p.LinkType, sess: s}
+	f := &Frame{Pkt: p, Link: p.LinkType, sess: s, StreamIdx: -1}
 	c := newCursor(p.Data, true)
 	switch p.LinkType {
 	case dltEther:
@@ -582,6 +586,10 @@ func (f *Frame) decodeTCP(c *cursor, wire, avail int) {
 	f.HasTCP = true
 	f.TCPLen = wire - f.DataOff
 	f.Payload = clamp(c, avail-f.DataOff)
+	if f.sess != nil {
+		st := f.sess.feedTCP(f)
+		f.StreamIdx = st.Index
+	}
 }
 
 // decodeTCPOptions walks the option list. Kinds 0 and 1 are one byte; every
@@ -643,6 +651,9 @@ func (f *Frame) decodeUDP(c *cursor, wire, avail int) {
 		return
 	}
 	f.HasUDP = true
+	if f.sess != nil {
+		f.StreamIdx = f.sess.udpStream(f)
+	}
 	n := int(f.ULen) - 8
 	if n < 0 || n > avail-8 {
 		n = avail - 8

@@ -341,6 +341,117 @@ def conversation(payloads, sport=40000, dport=80, isn_c=1000, isn_s=5000,
     return frames
 
 
+def tcpseg(d, seq, data=b"", flags=None, ack=1, win=65535, sport=40000,
+           dport=80):
+    """One TCP segment on ethernet over IPv4. d is 0 for client to server."""
+    if flags is None:
+        flags = (PSH | ACK) if data else ACK
+    if d == 0:
+        return eth(ip4(tcp(data, sport=sport, dport=dport, seq=seq, ack=ack,
+                           flags=flags, window=win)))
+    return eth(ip4(tcp(data, sport=dport, dport=sport, seq=seq, ack=ack,
+                       flags=flags, window=win, src=IP_B, dst=IP_A),
+                   src=IP_B, dst=IP_A))
+
+
+def handshake(isn_c=1000, isn_s=5000, sport=40000, dport=80):
+    return [tcpseg(0, isn_c, b"", SYN, 0, sport=sport, dport=dport),
+            tcpseg(1, isn_s, b"", SYN | ACK, isn_c + 1, sport=sport, dport=dport),
+            tcpseg(0, isn_c + 1, b"", ACK, isn_s + 1, sport=sport, dport=dport)]
+
+
+def reassembly_corpus(p):
+    """The cases the live corpus cannot produce. Every one of these was
+    first run through tshark to find out what it does, because the answer
+    decides what correct means here."""
+    hs = handshake()
+
+    write_pcap(p("re-inorder.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1004, b"BBB"),
+        tcpseg(1, 5001, b"ccc"), tcpseg(0, 1007, b"CCC")])
+
+    # Out of order, and out of order where the FIRST data segment of the
+    # direction is the late one, which is what decides where the stream
+    # origin comes from.
+    write_pcap(p("re-outoforder.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1007, b"CCC"), tcpseg(0, 1004, b"BBB")])
+    write_pcap(p("re-outoforder-first.pcap"), hs + [
+        tcpseg(0, 1004, b"BBB"), tcpseg(0, 1001, b"AAA"), tcpseg(0, 1007, b"CCC")])
+
+    write_pcap(p("re-retransmission.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1001, b"AAA"), tcpseg(0, 1004, b"BBB")])
+
+    # Overlapping segments. The first carries six bytes; the second starts
+    # three in and disagrees about the three it repeats.
+    write_pcap(p("re-overlap-conflict.pcap"), hs + [
+        tcpseg(0, 1001, b"AAAAAA"), tcpseg(0, 1004, b"xxxyyy"),
+        tcpseg(0, 1010, b"ZZZ")])
+    write_pcap(p("re-overlap-same.pcap"), hs + [
+        tcpseg(0, 1001, b"AAAAAA"), tcpseg(0, 1004, b"AAAyyy"),
+        tcpseg(0, 1010, b"ZZZ")])
+    # A later segment that starts BEFORE a held one and covers all of it.
+    write_pcap(p("re-overlap-swallow.pcap"), hs + [
+        tcpseg(0, 1004, b"BBB"), tcpseg(0, 1001, b"AAAAAAAAA")])
+    # Overlap in both directions at once, and a conflict in each.
+    write_pcap(p("re-overlap-bothways.pcap"), hs + [
+        tcpseg(0, 1001, b"request-one"), tcpseg(0, 1005, b"XXXX-two"),
+        tcpseg(1, 5001, b"reply-one"), tcpseg(1, 5004, b"YYY-two")])
+
+    # A hole that never fills. tshark delivers nothing after it and
+    # neither do we.
+    write_pcap(p("re-permanent-gap.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"), tcpseg(1, 5001, b"reply")])
+
+    # No handshake in the capture at all, and the same again where the
+    # first data segment is not the lowest sequence number, so the bytes
+    # below the origin are unreachable.
+    write_pcap(p("re-nohandshake.pcap"), [
+        tcpseg(0, 9000, b"midstream"), tcpseg(1, 7000, b"answer", ack=9009)])
+    write_pcap(p("re-nohandshake-ooo.pcap"), [
+        tcpseg(0, 1004, b"BBB"), tcpseg(0, 1001, b"AAA"), tcpseg(0, 1007, b"CCC")])
+
+    # Sequence numbers crossing 2^32. A comparison written with < instead
+    # of serial arithmetic is wrong only here.
+    write_pcap(p("re-wraparound.pcap"), [
+        tcpseg(0, 0xFFFFFFF0, b"", SYN, 0),
+        tcpseg(1, 5000, b"", SYN | ACK, 0xFFFFFFF1),
+        tcpseg(0, 0xFFFFFFF1, b"", ACK, 5001),
+        tcpseg(0, 0xFFFFFFF1, b"ABCDEFGHIJKLMNO"),
+        tcpseg(0, 0x00000000, b"WRAPPED")])
+
+    # A one-byte probe repeating the last delivered octet, which is what a
+    # zero-window probe looks like, followed by the real continuation.
+    write_pcap(p("re-zerowindow.pcap"), hs + [
+        tcpseg(0, 1001, b"HELLO"),
+        tcpseg(1, 5001, b"", ACK, 1006, win=0),
+        tcpseg(0, 1005, b"H"),
+        tcpseg(1, 5001, b"", ACK, 1006, win=0),
+        tcpseg(0, 1006, b"WORLD")])
+
+    # A FIN does not consume a sequence number for reassembly, so data at
+    # the FIN's own number is delivered, and data one past it is not.
+    write_pcap(p("re-data-at-fin.pcap"), hs + [
+        tcpseg(0, 1001, b"BEFORE"), tcpseg(0, 1007, b"", FIN | ACK),
+        tcpseg(0, 1007, b"AFTER")])
+    write_pcap(p("re-data-after-fin.pcap"), hs + [
+        tcpseg(0, 1001, b"BEFORE"), tcpseg(0, 1007, b"", FIN | ACK),
+        tcpseg(0, 1008, b"AFTER")])
+    write_pcap(p("re-data-after-rst.pcap"), hs + [
+        tcpseg(0, 1001, b"BEFORE"), tcpseg(1, 5001, b"", RST),
+        tcpseg(0, 1007, b"AFTER")])
+
+    # Three conversations interleaved, so the stream numbering is tested
+    # against something other than a file with one stream in it.
+    f = []
+    for i in range(3):
+        f += handshake(isn_c=1000 + i * 100, isn_s=5000 + i * 100,
+                       sport=40000 + i, dport=80 + i)
+    for i in range(3):
+        f.append(tcpseg(0, 1001 + i * 100, bytes([0x61 + i]) * 4,
+                        sport=40000 + i, dport=80 + i))
+    write_pcap(p("re-three-streams.pcap"), f)
+
+
 def main(outdir):
     os.makedirs(outdir, exist_ok=True)
     p = lambda n: os.path.join(outdir, n)
@@ -524,6 +635,8 @@ def main(outdir):
     write_pcap(p("frag-oversize.pcap"),
                [eth(ip4(b"\x5a" * 600, proto=17, ident=0x1007, mf=True,
                         frag=65000))])
+
+    reassembly_corpus(p)
 
     v6conv = conversation([(0, b"ping"), (1, b"pong")], v6=True,
                           src=IP6_A, dst=IP6_B)

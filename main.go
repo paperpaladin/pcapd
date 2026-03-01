@@ -23,6 +23,8 @@ commands:
   info     file-level facts: format, byte order, link type, packet count
   fields   per-packet field values, one line per packet, tab separated
   counts   how many of each construct the named captures contain
+  streams  one line per TCP conversation: index, endpoints, byte counts
+  follow   the reassembled bytes of one TCP stream
 `
 
 func die(format string, a ...any) {
@@ -77,6 +79,10 @@ func main() {
 		cmdFields(args)
 	case "counts":
 		cmdCounts(args)
+	case "streams":
+		cmdStreams(args)
+	case "follow":
+		cmdFollow(args)
 	default:
 		fmt.Fprintf(os.Stderr, "pcapd: unknown command %q\n", cmd)
 		os.Exit(exitUsage)
