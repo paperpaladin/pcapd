@@ -50,13 +50,16 @@ func (e endpoint) String() string {
 }
 
 // Conflict records one disagreement about the content of a stream octet.
+// Both readings are kept, and which one the stream ends up holding is
+// decided by the policy, so the record does not say "kept" and "lost": a
+// reader of the output can see what the other policy would have given.
 type Conflict struct {
-	Dir    int
-	Offset int64
-	Len    int
-	Kept   []byte
-	Lost   []byte
-	Packet int
+	Dir     int
+	Offset  int64
+	Len     int
+	Earlier []byte
+	Later   []byte
+	Packet  int
 }
 
 type heldSeg struct {
@@ -266,9 +269,9 @@ func (st *Stream) place(s *Session, dir int, abs, wire int64, data []byte, pkt i
 			if !bytesEqual(old, data[:cmp]) {
 				st.Conflicts = append(st.Conflicts, Conflict{
 					Dir: dir, Offset: abs, Len: int(cmp),
-					Kept:   append([]byte(nil), old...),
-					Lost:   append([]byte(nil), data[:cmp]...),
-					Packet: pkt,
+					Earlier: append([]byte(nil), old...),
+					Later:   append([]byte(nil), data[:cmp]...),
+					Packet:  pkt,
 				})
 				s.stat("tcp.overlap.conflict")
 				if s.OverlapLast {

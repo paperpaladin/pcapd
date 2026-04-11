@@ -99,9 +99,10 @@ func cmdFollow(args []string) {
 	fmt.Fprintf(w, "bytes: %d from node 0, %d from node 1\n", len(st.Bytes(0)), len(st.Bytes(1)))
 	fmt.Fprintf(w, "conflicts: %d\n", len(st.Conflicts))
 	for _, cf := range st.Conflicts {
-		fmt.Fprintf(w, "conflict: direction %d offset %d length %d packet %d kept %s lost %s\n",
+		fmt.Fprintf(w, "conflict: direction %d offset %d length %d packet %d earlier %s later %s kept %s\n",
 			cf.Dir, cf.Offset, cf.Len, cf.Packet,
-			hex.EncodeToString(cf.Kept), hex.EncodeToString(cf.Lost))
+			hex.EncodeToString(cf.Earlier), hex.EncodeToString(cf.Later),
+			map[bool]string{false: "earlier", true: "later"}[overlapLast])
 	}
 	fmt.Fprintf(w, "held-undelivered: %d bytes\n", st.Dropped)
 	fmt.Fprintf(w, "0: %s\n", hex.EncodeToString(st.Bytes(0)))

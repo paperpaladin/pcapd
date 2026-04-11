@@ -175,6 +175,37 @@ eq "tshark follow: every stream identical" "differ=0 broken=0" "differ=$differ b
 echo "     $streams streams over $files files, $bytes reassembled bytes, $same identical"
 
 echo
+echo "--- the overlap policy, and a second implementation of it ---"
+# tshark implements one policy, so it cannot be the oracle for the other
+# one. This reassembles both from the segment list tshark reports, in
+# Python that shares no code with pcapd.
+ov=$(PCAPD=$PCAPD python3 t/overlapcmp.py $(corpus_ok))
+echo "$ov" | grep -v '^TOTAL'
+eval "$(echo "$ov" | sed -n 's/^TOTAL //p')"
+eq "python reassembler agrees under both policies" "differ=0 broken=0" "differ=$differ broken=$broken"
+echo "     $checked stream and policy pairs, $bytes bytes"
+
+# A policy flag that produces the same bytes either way is decoration.
+C=t/corpus/hand/re-overlap-conflict.pcap
+S=t/corpus/hand/re-overlap-same.pcap
+if [ -e "$C" ]; then
+	a=$($PCAPD follow --overlap=first 0 "$C" | sed -n 's/^0: //p')
+	b=$($PCAPD follow --overlap=last  0 "$C" | sed -n 's/^0: //p')
+	if [ "$a" != "$b" ]; then
+		ok "the two overlap policies give different bytes on a conflict"
+	else
+		bad "the two overlap policies give the same bytes: $a"
+	fi
+	eq "first-wins keeps the earlier bytes" "4141414141417979795a5a5a" "$a"
+	eq "last-wins keeps the later bytes"    "4141417878787979795a5a5a" "$b"
+	a=$($PCAPD follow --overlap=first 0 "$S" | sed -n 's/^0: //p')
+	b=$($PCAPD follow --overlap=last  0 "$S" | sed -n 's/^0: //p')
+	eq "an overlap with matching bytes is policy-independent" "$a" "$b"
+	status "--tshark with --overlap=last is refused" 2 \
+		$PCAPD follow --tshark --overlap=last 0 "$C"
+fi
+
+echo
 echo "--- refusals ---"
 status "no args is a usage error"    2 $PCAPD
 status "unknown command is usage"    2 $PCAPD frobnicate
