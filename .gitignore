@@ -5,3 +5,4 @@ t/tmp.*
 *.pcap
 *.pcapng
 *.tmp
+__pycache__/

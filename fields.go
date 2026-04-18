@@ -39,6 +39,11 @@ func init() {
 		if !f.Pkt.HasTS {
 			return ""
 		}
+		if f.Pkt.BadTS {
+			// tshark prints a diagnostic here rather than a time. We
+			// have no value to offer and say so.
+			return refusedMark
+		}
 		return fmt.Sprintf("%d.%09d", f.Pkt.TsSec, f.Pkt.TsNsec)
 	})
 	reg("frame.interface_id", func(f *Frame) string { return fmt.Sprint(f.Pkt.Iface) })

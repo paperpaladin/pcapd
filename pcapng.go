@@ -109,8 +109,13 @@ func (f *Capture) block(btype uint32, c *cursor, be bool, n *int) error {
 		c.u32() // byte-order magic, already read
 		f.Major = c.u16()
 		f.Minor = c.u16()
-		if f.Major != 1 {
-			return fmt.Errorf("pcapng: section header version %d.%d, only 1.x is defined", f.Major, f.Minor)
+		// Wireshark accepts 1.0 and 1.2 and nothing else: 1.1, 1.3,
+		// 1.4, 1.5, 2.0 and 0.0 are all refused by name. Measured by
+		// writing each one and handing it to capinfos, because "only
+		// 1.x is defined" is what the specification suggests and is
+		// not what the oracle does.
+		if f.Major != 1 || (f.Minor != 0 && f.Minor != 2) {
+			return fmt.Errorf("pcapng: section header version %d.%d, only 1.0 and 1.2 are read", f.Major, f.Minor)
 		}
 		c.u64() // section length, -1 when unknown; we walk blocks instead
 		if _, err := readOptions(c, "section header"); err != nil {
@@ -172,10 +177,10 @@ func (f *Capture) block(btype uint32, c *cursor, be bool, n *int) error {
 			return fmt.Errorf("pcapng: enhanced packet block at offset %d: captured length %d exceeds %d bytes of block body",
 				c.offset(), capLen, c.left())
 		}
-		if capLen > origLen {
-			return fmt.Errorf("pcapng: enhanced packet block at offset %d: captured length %d exceeds original length %d",
-				c.offset(), capLen, origLen)
-		}
+		// A captured length above the original length is malformed and
+		// Wireshark reads it anyway, reporting the original length as
+		// the frame length. Refusing it would be stricter than the
+		// oracle; see t/corpus/bad/ng-epb-caplen-above-origlen.cap.
 		data := c.take(int(capLen))
 		c.align4()
 		if _, err := readOptions(c, "enhanced packet"); err != nil {
@@ -257,9 +262,9 @@ func readOptions(c *cursor, where string) ([]ngOption, error) {
 			return nil, fmt.Errorf("pcapng: %s options: %w", where, c.err)
 		}
 		if code == 0 {
-			if l != 0 {
-				return nil, fmt.Errorf("pcapng: %s: opt_endofopt has length %d, must be 0", where, l)
-			}
+			// opt_endofopt must have length zero. Wireshark stops at it
+			// either way, so a non-zero length ends the list here too
+			// rather than failing the file.
 			return out, nil
 		}
 		if int(l) > c.left() {

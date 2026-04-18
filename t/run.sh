@@ -79,6 +79,16 @@ corpus_ok() {
 	ls t/corpus/conv/*.pcap 2>/dev/null | grep -v -- '-mod\.pcap$'
 }
 
+# The valid files the malformed sweep mutates. The whole corpus takes six
+# minutes, which is more than this suite should spend; make hostile runs
+# it over everything. These eight between them cover both containers, both
+# byte orders, a short snaplen and five link types.
+HOSTILE_FILES=${HOSTILE_FILES:-"$(ls t/corpus/hand/tcp-basic.pcap \
+	t/corpus/hand/tcp-basic-be.pcapng t/corpus/hand/ng-spb.pcapng \
+	t/corpus/hand/ng-nrb-isb.pcapng t/corpus/hand/link-null6-linux.pcap \
+	t/corpus/hand/re-overlap-conflict.pcap t/corpus/hand/frag-gap.pcap \
+	t/corpus/live/tcp6-echo.pcap 2>/dev/null)"}
+
 echo
 echo "--- file-level facts against capinfos ---"
 # capinfos -M -T -r prints one tab-separated row: name, type, encapsulation,
@@ -204,6 +214,29 @@ if [ -e "$C" ]; then
 	status "--tshark with --overlap=last is refused" 2 \
 		$PCAPD follow --tshark --overlap=last 0 "$C"
 fi
+
+echo
+echo "--- malformed files ---"
+# Lengths that point past the end of the file, three ways: named cases
+# written by hand, every prefix of every valid capture at a stride, and
+# single bytes overwritten with values chosen to be large. Each result is
+# classified, and a file pcapd reads is handed to the oracle to see
+# whether the oracle reads it too.
+#
+# crashed and hung must be zero. A panic is a refusal that did not
+# happen, and a hang is a length that became a loop bound.
+HD=$W/hostile
+mkdir -p "$HD"
+hs=$(PCAPD=$PCAPD HOSTILE_ORACLE_EVERY=${HOSTILE_ORACLE_EVERY:-100} \
+     python3 t/hostile.py "$HD" $HOSTILE_FILES 2>&1)
+echo "$hs" | grep -v '^TOTAL'
+eval "$(echo "$hs" | sed -n 's/^TOTAL //p')"
+eq "malformed: nothing crashes or hangs" "crashed=0 hung=0" "crashed=$crashed hung=$hung"
+echo "     $runs malformed files: $refused refused, $accepted read"
+echo "     $oracled of them put to capinfos and tshark as well:"
+echo "     $ouraccept_theirrefuse we read and the oracle refuses,"
+echo "     $theiraccept_ourrefuse the oracle reads and we refuse,"
+echo "     $linktypeonly refused by the oracle for the link type alone"
 
 echo
 echo "--- refusals ---"

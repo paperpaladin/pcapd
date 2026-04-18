@@ -25,6 +25,7 @@ commands:
   counts   how many of each construct the named captures contain
   streams  one line per TCP conversation: index, endpoints, byte counts
   follow   the reassembled bytes of one TCP stream
+  check    decode each named file completely; print ok or the refusal
 `
 
 func die(format string, a ...any) {
@@ -83,6 +84,8 @@ func main() {
 		cmdStreams(args)
 	case "follow":
 		cmdFollow(args)
+	case "check":
+		cmdCheck(args)
 	default:
 		fmt.Fprintf(os.Stderr, "pcapd: unknown command %q\n", cmd)
 		os.Exit(exitUsage)

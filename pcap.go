@@ -35,6 +35,9 @@ type Packet struct {
 	// timestamp at all. Reporting zero for it would be a timestamp of
 	// 1 January 1970 presented as a fact.
 	HasTS bool
+	// BadTS is true when the fractional part of the timestamp was at or
+	// above the units in a second, which no arithmetic can repair.
+	BadTS bool
 }
 
 // Iface is a capture interface. Classic pcap has exactly one, implied by the
@@ -106,13 +109,26 @@ func readPcap(b []byte) (*Capture, error) {
 	f.TZOffset = int32(c.u32())
 	c.u32() // sigfigs, always zero in practice and ignored by libpcap too
 	f.SnapLen = c.u32()
-	link := c.u32()
+	network := c.u32()
+	// The link type field is 32 bits and only the low 16 are the link
+	// type. Bits 16 to 25 are reserved and must be zero; libpcap refuses
+	// a file that sets any of them and reports which. Bits 26 upwards
+	// carry frame-check-sequence information and are ignored here.
+	//
+	// The mask was measured, not read: a file was written with each bit
+	// from 16 to 31 set in turn and handed to capinfos. 16 through 25
+	// are refused, 26 through 31 are read as ordinary ethernet.
+	if network&0x03FF0000 != 0 {
+		return nil, fmt.Errorf("pcap: link type field %#08x sets reserved bits %#08x", network, network&0x03FF0000)
+	}
+	link := network & 0xFFFF
 	if !c.ok() {
 		return nil, fmt.Errorf("pcap: %w", c.err)
 	}
-	if f.Major != 2 || f.Minor != 4 {
-		return nil, fmt.Errorf("pcap: unsupported version %d.%d, only 2.4 is defined", f.Major, f.Minor)
-	}
+	// The version is recorded and not enforced. 2.4 is the only version
+	// anything writes, but libpcap reads a file claiming 3.4 without
+	// complaint and so does capinfos, and refusing what the oracle reads
+	// is a defect of its own: see t/corpus/bad/pcap-version-3-4.cap.
 	f.Ifaces = []Iface{{LinkType: link, SnapLen: f.SnapLen, TsDiv: 1000000, Name: ""}}
 	if nanos {
 		f.Ifaces[0].TsDiv = 1000000000
@@ -127,9 +143,6 @@ func readPcap(b []byte) (*Capture, error) {
 		frac := c.u32()
 		inclLen := c.u32()
 		origLen := c.u32()
-		if frac >= uint32(f.Ifaces[0].TsDiv) {
-			return nil, fmt.Errorf("pcap: record %d: fractional timestamp %d is not below %d", n+1, frac, f.Ifaces[0].TsDiv)
-		}
 		if inclLen > origLen {
 			return nil, fmt.Errorf("pcap: record %d: captured length %d exceeds original length %d", n+1, inclLen, origLen)
 		}
@@ -141,6 +154,12 @@ func readPcap(b []byte) (*Capture, error) {
 			return nil, fmt.Errorf("pcap: record %d: %w", n+1, c.err)
 		}
 		n++
+		// A fractional part at or above the units in a second is
+		// malformed: 1500000 microseconds is a second and a half. The
+		// record is kept, because libpcap keeps it and tshark prints a
+		// diagnostic in place of the time, but the timestamp is marked
+		// unusable rather than being printed as a fact.
+		badTS := frac >= uint32(f.Ifaces[0].TsDiv)
 		ns := frac
 		if !nanos {
 			ns = frac * 1000
@@ -148,7 +167,7 @@ func readPcap(b []byte) (*Capture, error) {
 		f.Packets = append(f.Packets, Packet{
 			Num: n, TsSec: int64(sec), TsNsec: ns,
 			CapLen: inclLen, OrigLen: origLen, LinkType: link, Iface: 0, Data: data,
-			HasTS: true,
+			HasTS: true, BadTS: badTS,
 		})
 	}
 	return f, nil

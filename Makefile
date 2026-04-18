@@ -15,6 +15,12 @@ pcapd: $(wildcard *.go) go.mod
 test: all
 	./t/run.sh
 
+# The malformed-file sweep over the whole corpus rather than the eight
+# files t/run.sh samples. Six minutes, most of it in capinfos and tshark.
+hostile: all
+	HOSTILE_FILES="$$(ls t/corpus/hand/* t/corpus/live/*.pcap)" \
+	HOSTILE_ORACLE_EVERY=25 ./t/run.sh
+
 vet:
 	$(GO) vet ./...
 
@@ -22,4 +28,4 @@ clean:
 	rm -f pcapd
 	rm -rf t/corpus t/tmp.*
 
-.PHONY: all test vet clean
+.PHONY: all test hostile vet clean

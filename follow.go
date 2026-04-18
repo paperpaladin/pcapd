@@ -126,3 +126,55 @@ func writeTsharkFollow(w *bufio.Writer, st *Stream) {
 	}
 	fmt.Fprintln(w, followRule)
 }
+
+// cmdCheck runs the whole decoder over each named file and reports one
+// line per file: ok, or the message it refused with. It exists for the
+// hostile-input sweep, which throws thousands of malformed files at the
+// parser and would otherwise spend most of its time starting processes.
+//
+// A panic is caught here and reported with the file that caused it. That
+// is deliberate and confined to this one command: everywhere else a panic
+// should be a crash, because a crash is visible, but a sweep needs to
+// attribute one to a file and carry on to find the next.
+func cmdCheck(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: pcapd check FILE [FILE ...]")
+		os.Exit(exitUsage)
+	}
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	for _, p := range args {
+		fmt.Fprintf(w, "%s\t%s\n", p, checkOne(p))
+	}
+}
+
+func checkOne(path string) (verdict string) {
+	defer func() {
+		if r := recover(); r != nil {
+			verdict = fmt.Sprintf("PANIC: %v", r)
+		}
+	}()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "refused: " + err.Error()
+	}
+	c, err := readCapture(b)
+	if err != nil {
+		return "refused: " + err.Error()
+	}
+	s := NewSession()
+	for i := range c.Packets {
+		f := decodeIn(s, &c.Packets[i])
+		// Touch every field, so the formatting paths are exercised too
+		// rather than only the decoding ones.
+		for _, fn := range fields {
+			_ = fn(f)
+		}
+	}
+	for _, st := range s.Streams {
+		st.finish()
+		_ = st.Bytes(0)
+		_ = st.Bytes(1)
+	}
+	return "ok"
+}
