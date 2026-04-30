@@ -150,6 +150,14 @@ def named_cases():
     body = struct.pack("<HHI", 1, 0, 65535) + struct.pack("<HH", 2, 0x7FFF)
     add("ng-option-length-past-block",
         goodng[:28] + _ngblock(1, body) + goodng[28:])
+    # An opt_endofopt whose length runs past the end of the block. The
+    # one above has a length that fits, which Wireshark reads; this one
+    # does not, which Wireshark refuses. A reader that returns at the
+    # code before checking the length cannot tell them apart.
+    add("ng-endofopt-length-past-block",
+        goodng[:28] + _ngblock(1, struct.pack("<HHI", 1, 0, 65535)
+                               + struct.pack("<HH", 0, 0x7FFF))
+        + goodng[28:])
     add("ng-endofopt-with-length",
         goodng[:28] + _ngblock(1, struct.pack("<HHI", 1, 0, 65535)
                                + struct.pack("<HH", 0, 4) + b"\x00" * 4)
@@ -261,6 +269,10 @@ def main(argv):
     runs = 0
     pending = []   # (name, path, check_oracle)
     linktype_only = [0]
+    # Named cases are the ones a human wrote down on purpose. Every one
+    # of them must land on the same side as the oracle; the sweep cases
+    # are allowed to disagree and are counted instead.
+    named_bad = [0]
 
     def flush():
         nonlocal runs, they_read_we_refuse, oracled
@@ -292,11 +304,15 @@ def main(argv):
                     continue
                 if verdict == "accepted" and not good:
                     we_read_they_refuse.append(name)
+                    if name.startswith("named/"):
+                        named_bad[0] += 1
                     os.replace(path, os.path.join(
                         workdir, "keep-weread-" + name.replace("/", "_")))
                     continue
                 if verdict == "refused" and good:
                     they_read_we_refuse += 1
+                    if name.startswith("named/"):
+                        named_bad[0] += 1
                     os.replace(path, os.path.join(
                         workdir, "keep-theyread-" + name.replace("/", "_")))
                     continue
@@ -340,10 +356,10 @@ def main(argv):
         print("ACCEPTED-BY-US-ONLY %s" % n)
     print("TOTAL runs=%d refused=%d accepted=%d crashed=%d hung=%d "
           "oracled=%d ouraccept_theirrefuse=%d theiraccept_ourrefuse=%d "
-          "linktypeonly=%d"
+          "linktypeonly=%d namedbad=%d"
           % (runs, tally["refused"], tally["accepted"], tally["crashed"],
              tally["hung"], oracled, len(we_read_they_refuse),
-             they_read_we_refuse, linktype_only[0]))
+             they_read_we_refuse, linktype_only[0], named_bad[0]))
     return 0
 
 

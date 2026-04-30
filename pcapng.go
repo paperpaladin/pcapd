@@ -261,15 +261,22 @@ func readOptions(c *cursor, where string) ([]ngOption, error) {
 		if !c.ok() {
 			return nil, fmt.Errorf("pcapng: %s options: %w", where, c.err)
 		}
-		if code == 0 {
-			// opt_endofopt must have length zero. Wireshark stops at it
-			// either way, so a non-zero length ends the list here too
-			// rather than failing the file.
-			return out, nil
-		}
+		// The length is checked before the code is looked at. Wireshark
+		// validates the option header against what is left of the block
+		// and only then decides what the option means, so an
+		// opt_endofopt whose length runs past the end of the block is a
+		// malformed block and not the end of a list. Doing it the other
+		// way round reads one byte of a block as the whole truth about
+		// where that block stops.
 		if int(l) > c.left() {
 			return nil, fmt.Errorf("pcapng: %s: option %d claims %d bytes with %d left in the block",
 				where, code, l, c.left())
+		}
+		if code == 0 {
+			// opt_endofopt should have length zero, and Wireshark reads a
+			// block where it does not, so a length that fits inside the
+			// block ends the list here rather than failing the file.
+			return out, nil
 		}
 		v := c.take(int(l))
 		c.align4()

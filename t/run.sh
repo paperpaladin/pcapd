@@ -232,6 +232,7 @@ hs=$(PCAPD=$PCAPD HOSTILE_ORACLE_EVERY=${HOSTILE_ORACLE_EVERY:-100} \
 echo "$hs" | grep -v '^TOTAL'
 eval "$(echo "$hs" | sed -n 's/^TOTAL //p')"
 eq "malformed: nothing crashes or hangs" "crashed=0 hung=0" "crashed=$crashed hung=$hung"
+eq "malformed: every named case lands where the oracle lands" 0 "$namedbad"
 echo "     $runs malformed files: $refused refused, $accepted read"
 echo "     $oracled of them put to capinfos and tshark as well:"
 echo "     $ouraccept_theirrefuse we read and the oracle refuses,"
