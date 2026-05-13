@@ -192,12 +192,23 @@ func (f *Capture) block(btype uint32, c *cursor, be bool, n *int) error {
 		if !c.ok() {
 			return fmt.Errorf("pcapng: simple packet block: %w", c.err)
 		}
-		// An SPB carries no captured length. It is the block length minus
-		// the 16 bytes of framing and the original-length field, less any
-		// padding, and the padding is only recoverable from origLen.
-		capLen := uint32(c.left())
-		if origLen < capLen {
-			capLen = origLen
+		// An SPB carries no captured length of its own. The specification
+		// says it holds min(original length, interface snaplen) bytes,
+		// and that is the rule Wireshark applies: the block length is
+		// then a cross-check on that figure rather than the source of
+		// it. Taking the figure from the block instead, as this did,
+		// silently truncates a packet whose original length was
+		// corrupted upwards and reports the result as a whole packet.
+		if len(f.Ifaces) == 0 {
+			return fmt.Errorf("pcapng: simple packet block before any interface description")
+		}
+		capLen := origLen
+		if snap := f.Ifaces[0].SnapLen; snap != 0 && snap < capLen {
+			capLen = snap
+		}
+		if int64(capLen) > int64(c.left()) {
+			return fmt.Errorf("pcapng: simple packet block at offset %d holds %d bytes, but original length %d and snaplen %d call for %d",
+				c.offset(), c.left(), origLen, f.Ifaces[0].SnapLen, capLen)
 		}
 		data := c.take(int(capLen))
 		if !c.ok() {

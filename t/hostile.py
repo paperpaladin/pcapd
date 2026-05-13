@@ -173,6 +173,14 @@ def named_cases():
         goodng[:28] + _ngblock(1, struct.pack("<HHI", 1, 0, 65535)
                                + struct.pack("<HH", 9, 1) + bytes([60]) + b"\x00" * 3
                                + struct.pack("<HH", 0, 0)) + goodng[28:])
+    # A simple packet block has no captured length of its own, so the
+    # original length and the interface snaplen between them say how many
+    # bytes the block must hold. These two claim more than it does.
+    spb = struct.pack("<I", 0x7FFFFFFF) + b"\x00" * 60
+    add("ng-spb-origlen-past-block", goodng + _ngblock(3, spb))
+    spb = struct.pack("<I", 100) + b"\x00" * 60
+    add("ng-spb-origlen-above-block", goodng + _ngblock(3, spb))
+
     # A name resolution record claiming more bytes than the block holds.
     nrb = struct.pack("<HH", 1, 0x7FFF) + b"\x0a\x00\x00\x01host\x00"
     add("ng-nrb-record-past-block", goodng + _ngblock(4, nrb))
