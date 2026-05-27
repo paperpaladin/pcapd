@@ -233,11 +233,20 @@ echo "$hs" | grep -v '^TOTAL'
 eval "$(echo "$hs" | sed -n 's/^TOTAL //p')"
 eq "malformed: nothing crashes or hangs" "crashed=0 hung=0" "crashed=$crashed hung=$hung"
 eq "malformed: every named case lands where the oracle lands" 0 "$namedbad"
+eq "malformed: nothing we read is refused by both oracles" 0 "$ouraccept_theirrefuse"
+# A tie-break that never fires is not a tie-break. One named case exists
+# purely to make tcpdump and tshark disagree, so this must be non-zero.
+if [ "$split" -ge 1 ]; then
+	ok "malformed: the two oracles disagree about $split files"
+else
+	bad "malformed: no file made tshark and tcpdump disagree, so the tie-break never ran"
+fi
 echo "     $runs malformed files: $refused refused, $accepted read"
 echo "     $oracled of them put to capinfos and tshark as well:"
-echo "     $ouraccept_theirrefuse we read and the oracle refuses,"
-echo "     $theiraccept_ourrefuse the oracle reads and we refuse,"
-echo "     $linktypeonly refused by the oracle for the link type alone"
+echo "     $ouraccept_theirrefuse we read and both oracles refuse,"
+echo "     $theiraccept_ourrefuse the oracles read and we refuse,"
+echo "     $split tshark refuses and tcpdump reads,"
+echo "     $linktypeonly refused by tshark for the link type alone"
 
 echo
 echo "--- refusals ---"

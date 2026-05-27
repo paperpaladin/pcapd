@@ -84,7 +84,15 @@ CAPTURE_TYPES = ("pcap", "pcapng", "nsecpcap", "modpcap")
 
 
 def oracle(path):
-    """True when the oracle reads the file AS A CAPTURE.
+    """What the oracles make of the file.
+
+    True      Wireshark reads it as a capture.
+    False     Wireshark refuses it and so does libpcap.
+    "split"   Wireshark refuses it and libpcap reads it. The two
+              oracles disagree and pcapd siding with either is
+              defensible, so this is counted apart from both.
+    "linktype" Wireshark refuses it only because it has no dissector
+              for the link type.
 
     Exit status alone is not enough. Wireshark falls back to its MIME
     dissector for a file it cannot identify and reports one "packet"
@@ -96,12 +104,39 @@ def oracle(path):
     if rc != 0:
         if "unknown or unsupported" in err or "unknown encapsulation" in err:
             return "linktype"
-        return False
+        return "split" if libpcap_reads(path) else False
     cols = out.split("\n")[0].split("\t")
     if len(cols) < 2 or cols[1] not in CAPTURE_TYPES:
         return False
     rc, _, _ = run(["tshark", "-r", path, "-T", "fields", "-e", "frame.number"])
-    return rc == 0
+    if rc == 0:
+        return True
+    return "split" if libpcap_reads(path) else False
+
+
+def libpcap_reads(path):
+    """True when tcpdump walks the whole of a CLASSIC PCAP file.
+
+    tcpdump is the second decoder, and for classic pcap it is libpcap
+    reading the container rather than Wireshark's own reader, so the two
+    are independent and a disagreement between them is worth recording.
+
+    For pcapng it is not independent enough to be a tie-break. libpcap
+    skips every block type it does not use and never looks inside an
+    option list or a name resolution record, so "tcpdump read it" says
+    only that the packet blocks were fine. The first version of this
+    did not make that distinction and promptly reported
+    ng-trailing-length-mismatch and ng-nrb-record-past-block as
+    disagreements between the oracles, when in fact libpcap had never
+    examined the thing that was wrong with either file. pcapng files
+    return False here, which leaves Wireshark as the only authority on
+    them, which it is.
+    """
+    with open(path, "rb") as f:
+        if f.read(4) == b"\x0a\x0d\x0d\x0a":
+            return False
+    rc, _, err = run(["tcpdump", "-r", path, "-nn", "-c", "100000"])
+    return rc == 0 and "truncated" not in err
 
 
 # ------------------------------------------------------------ named cases
@@ -129,6 +164,27 @@ def named_cases():
         good[:24 + 8] + struct.pack("<II", 400, 60) + good[24 + 16:])
     add("pcap-usec-too-big",
         good[:24 + 4] + struct.pack("<I", 1500000) + good[24 + 8:])
+    # The one file in this list that the two oracles read differently.
+    # It is the corpus file with one byte of the second record's
+    # microsecond field set to 0xFF, which takes it from 1000 to
+    # 16712680. tcpdump reads the file unchanged apart from that
+    # timestamp. tshark refuses it, and the frames it does print before
+    # giving up have their fields 8 bytes later than they were written,
+    # which is the difference between pcap's 16-byte record header and
+    # the 24-byte one of the variants that share the standard magic, so
+    # it has picked a different variant off the back of one bad field.
+    #
+    # Making the same edit to a file built here does NOT reproduce it,
+    # over 20 record and value pairs, so the trigger is some further
+    # property of this capture that has not been pinned down. The file
+    # is used rather than a construction for that reason.
+    for src in ("t/corpus/hand/link-null6-linux.pcap",):
+        if os.path.exists(src):
+            with open(src, "rb") as f:
+                b = f.read()
+            if len(b) > 110:
+                add("pcap-usec-second-record-oracles-differ",
+                    b[:110] + b"\xff" + b[111:])
     add("pcap-snaplen-zero", good[:16] + struct.pack("<I", 0) + good[20:])
     add("pcap-one-byte-short", good[:-1])
 
@@ -281,6 +337,7 @@ def main(argv):
     # of them must land on the same side as the oracle; the sweep cases
     # are allowed to disagree and are counted instead.
     named_bad = [0]
+    split = []
 
     def flush():
         nonlocal runs, they_read_we_refuse, oracled
@@ -300,6 +357,15 @@ def main(argv):
             if want_oracle:
                 oracled += 1
                 good = oracle(path)
+                if good == "split":
+                    # Wireshark refuses the file, libpcap reads it. Every
+                    # one of these is named in the output: an oracle
+                    # disagreement that nothing prints is indistinguishable
+                    # from an oracle disagreement that nobody noticed.
+                    split.append((name, verdict))
+                    if os.path.exists(path):
+                        os.unlink(path)
+                    continue
                 if good == "linktype":
                     # The oracle refuses the file only because the link
                     # type is not one it has a dissector for. pcapd reads
@@ -362,12 +428,15 @@ def main(argv):
 
     for n in we_read_they_refuse[:20]:
         print("ACCEPTED-BY-US-ONLY %s" % n)
+    for n, v in split[:20]:
+        print("ORACLES-DISAGREE %s: wireshark refuses, libpcap reads, we %s" % (n, v))
     print("TOTAL runs=%d refused=%d accepted=%d crashed=%d hung=%d "
           "oracled=%d ouraccept_theirrefuse=%d theiraccept_ourrefuse=%d "
-          "linktypeonly=%d namedbad=%d"
+          "linktypeonly=%d namedbad=%d split=%d"
           % (runs, tally["refused"], tally["accepted"], tally["crashed"],
              tally["hung"], oracled, len(we_read_they_refuse),
-             they_read_we_refuse, linktype_only[0], named_bad[0]))
+             they_read_we_refuse, linktype_only[0], named_bad[0],
+             len(split)))
     return 0
 
 
