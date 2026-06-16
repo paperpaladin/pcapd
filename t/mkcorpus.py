@@ -419,14 +419,44 @@ def reassembly_corpus(p):
         tcpseg(0, 0xFFFFFFF1, b"ABCDEFGHIJKLMNO"),
         tcpseg(0, 0x00000000, b"WRAPPED")])
 
-    # A one-byte probe repeating the last delivered octet, which is what a
-    # zero-window probe looks like, followed by the real continuation.
-    write_pcap(p("re-zerowindow.pcap"), hs + [
+    # The same crossing with the segments out of order, which is the only
+    # arrangement that can tell serial arithmetic from a subtraction. The
+    # late segment sits at 0x00000001 while the stream is still at
+    # 0xFFFFFFF1: sixteen bytes ahead serially, four billion behind as
+    # plain integers. Replacing the serial comparison leaves the in-order
+    # wraparound capture identical, so without this file the mutation
+    # survives, which is what it did.
+    write_pcap(p("re-wraparound-ooo.pcap"), [
+        tcpseg(0, 0xFFFFFFF0, b"", SYN, 0),
+        tcpseg(1, 5000, b"", SYN | ACK, 0xFFFFFFF1),
+        tcpseg(0, 0xFFFFFFF1, b"", ACK, 5001),
+        tcpseg(0, 0x00000001, b"SECOND-HALF"),
+        tcpseg(0, 0xFFFFFFF1, b"FIRSTHALFxxxxxxx")])
+
+    # A one-byte segment repeating the last delivered octet, one BELOW
+    # the next expected sequence number. This comment used to call it a
+    # zero-window probe; tshark calls it a keep-alive, and tshark is
+    # right. It carries no new data and the stream must not grow by it.
+    write_pcap(p("re-keepalive.pcap"), hs + [
         tcpseg(0, 1001, b"HELLO"),
         tcpseg(1, 5001, b"", ACK, 1006, win=0),
         tcpseg(0, 1005, b"H"),
         tcpseg(1, 5001, b"", ACK, 1006, win=0),
         tcpseg(0, 1006, b"WORLD")])
+
+    # The real thing: one byte AT the next expected sequence number while
+    # the other side has advertised a window of zero. tshark marks these
+    # tcp.analysis.zero_window_probe and DELIVERS the byte, because it is
+    # new data. The second probe repeats the first and is dropped by the
+    # ordinary overlap path.
+    write_pcap(p("re-zerowindow-probe.pcap"), hs + [
+        tcpseg(0, 1001, b"HELLO"),
+        tcpseg(1, 5001, b"", ACK, 1006, win=0),
+        tcpseg(0, 1006, b"P"),
+        tcpseg(1, 5001, b"", ACK, 1006, win=0),
+        tcpseg(0, 1006, b"P"),
+        tcpseg(1, 5001, b"", ACK, 1007),
+        tcpseg(0, 1007, b"WORLD")])
 
     # A FIN does not consume a sequence number for reassembly, so data at
     # the FIN's own number is delivered, and data one past it is not.

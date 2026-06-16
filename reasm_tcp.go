@@ -82,6 +82,15 @@ type dirState struct {
 	// longer indexed by stream offset and cannot be used to decide
 	// whether an overlapping segment disagrees.
 	exact bool
+	// nseq is the highest sequence number this direction has reached,
+	// counting the SYN and the FIN, which is what tshark means by
+	// nextseq. It is kept apart from nextSeq above because that one is
+	// the reassembler's position in the byte stream and does not move
+	// for a segment carrying no data.
+	nseq     uint32
+	haveNseq bool
+	win      uint16
+	haveWin  bool
 }
 
 // Chunk is one emission: the bytes one segment contributed, and which way
@@ -171,6 +180,7 @@ func (s *Session) feedTCP(f *Frame) *Stream {
 	st, dir := s.tcpStream(f)
 	st.Packets++
 	d := &st.dirs[dir]
+	st.classify(s, dir, f)
 	if !d.haveBase {
 		if f.TFlags&0x02 != 0 { // SYN: the stream starts one past it
 			d.haveBase = true
@@ -205,6 +215,60 @@ func (s *Session) feedTCP(f *Frame) *Stream {
 	}
 	st.deliver(s, dir, abs, wire, f.Payload, f.Pkt.Num)
 	return st
+}
+
+// classify names the two one-byte segments that look like data and are
+// not the same thing as each other, and keeps the sequence and window
+// state they are recognised by. The definitions are tshark's, in tshark's
+// order, so that the counts can be compared with tcp.analysis.keep_alive
+// and tcp.analysis.zero_window_probe rather than with an idea of what a
+// probe is.
+//
+// The difference matters to the stream and not only to the count. A
+// zero-window probe carries one byte AT the next expected sequence
+// number, so it is new data and tshark delivers it; a keep-alive repeats
+// the last octet already delivered, one BELOW the next expected number,
+// so it is not. Reassembly gets both right through the ordinary overlap
+// path, which is why neither needed a special case to be correct, only
+// to be counted.
+func (st *Stream) classify(s *Session, dir int, f *Frame) {
+	d := &st.dirs[dir]
+	rev := &st.dirs[1-dir]
+	seglen := uint32(0)
+	if f.TCPLen > 0 {
+		seglen = uint32(f.TCPLen)
+	}
+	probe := false
+	if d.haveNseq {
+		switch {
+		case seglen == 1 && f.Seq == d.nseq && rev.haveWin && rev.win == 0:
+			probe = true
+			s.stat("tcp.zerowindowprobe")
+		case (seglen == 0 || seglen == 1) && f.Seq == d.nseq-1 &&
+			f.TFlags&0x07 == 0: // not SYN, FIN or RST
+			s.stat("tcp.keepalive")
+		}
+	}
+	next := f.Seq + seglen
+	if f.TFlags&0x02 != 0 { // SYN occupies one sequence number
+		next++
+	}
+	if f.TFlags&0x01 != 0 { // and so does FIN
+		next++
+	}
+	// A zero-window probe does not move the next expected sequence
+	// number. The receiver advertised no room, so the byte is not
+	// accepted and the next probe is at the same place; without this the
+	// second probe of a pair reads as a keep-alive, which is what this
+	// code did until the counts were put beside tshark's. Note that the
+	// byte IS delivered into the reassembled stream, by tshark and by
+	// us: analysis position and stream position are different things.
+	if !probe && (!d.haveNseq || int32(next-d.nseq) > 0) {
+		d.nseq = next
+		d.haveNseq = true
+	}
+	d.win = f.Window
+	d.haveWin = true
 }
 
 // deliver places one segment, emits whatever became contiguous, and then
@@ -303,6 +367,13 @@ func (st *Stream) place(s *Session, dir int, abs, wire int64, data []byte, pkt i
 	}
 	d.out = append(d.out, data...)
 	d.nextAbs = abs + wire
+	if d.nextSeq+uint32(wire) < d.nextSeq {
+		// The stream position crossed 2^32. Counted here rather than
+		// inferred from the sequence numbers in the file, because this
+		// is the one place the arithmetic that has to be serial
+		// actually runs.
+		s.stat("tcp.seqwrap")
+	}
 	d.nextSeq += uint32(wire)
 	if len(data) > 0 {
 		st.Chunks = append(st.Chunks, Chunk{Dir: dir, Data: append([]byte(nil), data...), Packet: pkt})

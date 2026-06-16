@@ -141,6 +141,7 @@ for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          ng.block.shb ng.block.idb ng.block.epb ng.block.spb ng.block.nrb \
          ng.block.isb ng.block.dsb ng.block.unknown-0x12345678 \
          tcp.overlap tcp.overlap.conflict tcp.retransmission \
+         tcp.keepalive tcp.zerowindowprobe tcp.seqwrap \
          tcp.outoforder tcp.nohandshake tcp.beforeorigin tcp.snapped \
          ipfrag.reassembled ipfrag.overlap ipfrag.conflict ipfrag.gap \
          ipfrag.oversize \
@@ -148,6 +149,22 @@ for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          ng.tsoffset ng.nameresolution.records; do
 	has "$k"
 done
+
+# Two one-byte segments that look alike and are not the same thing. The
+# counts above are produced by the same decoder the tests use, so for
+# these two they are put beside tshark's own analysis of the same files.
+# A construct counter that only agrees with itself is the vacuous pass
+# one level up.
+ka=0; zp=0
+for f in $(corpus_ok); do
+	out=$(tshark -r "$f" -T fields -e tcp.analysis.keep_alive \
+	      -e tcp.analysis.zero_window_probe 2>/dev/null)
+	ka=$((ka + $(printf '%s\n' "$out" | awk -F'\t' '$1!=""' | wc -l)))
+	zp=$((zp + $(printf '%s\n' "$out" | awk -F'\t' '$2!=""' | wc -l)))
+done
+cnt() { n=$(awk -F"\t" -v k="$1" '$1==k{print $2}' "$W/counts"); [ -n "$n" ] || n=0; echo "$n"; }
+eq "keep-alives: same count as tcp.analysis.keep_alive" "$ka" "$(cnt tcp.keepalive)"
+eq "zero-window probes: same count as tcp.analysis.zero_window_probe" "$zp" "$(cnt tcp.zerowindowprobe)"
 
 # Every live capture must hold packets. Three separate scenarios silently
 # produced a 24-byte header and nothing else before tcpdump was told to
