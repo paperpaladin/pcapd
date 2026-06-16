@@ -142,6 +142,7 @@ for k in file.pcap file.pcapng file.bigendian file.nanosecond \
          ng.block.isb ng.block.dsb ng.block.unknown-0x12345678 \
          tcp.overlap tcp.overlap.conflict tcp.retransmission \
          tcp.keepalive tcp.zerowindowprobe tcp.seqwrap \
+         tcp.data.atfin tcp.data.afterfin tcp.data.afterrst \
          tcp.outoforder tcp.nohandshake tcp.beforeorigin tcp.snapped \
          ipfrag.reassembled ipfrag.overlap ipfrag.conflict ipfrag.gap \
          ipfrag.oversize \

@@ -91,6 +91,11 @@ type dirState struct {
 	haveNseq bool
 	win      uint16
 	haveWin  bool
+	// finSeq is the sequence number a FIN was seen at in this
+	// direction, which is the number of the octet after the last one
+	// the sender means to send.
+	finSeq  uint32
+	haveFin bool
 }
 
 // Chunk is one emission: the bytes one segment contributed, and which way
@@ -115,6 +120,7 @@ type Stream struct {
 	NoHand    bool
 	Dropped   int // bytes held at the end that never became contiguous
 	heldLimit bool
+	sawRST    bool
 }
 
 const heldLimitBytes = 4 << 20
@@ -269,6 +275,33 @@ func (st *Stream) classify(s *Session, dir int, f *Frame) {
 	}
 	d.win = f.Window
 	d.haveWin = true
+
+	// Where the stream ends decides what its last bytes are, so the
+	// three arrangements are counted apart. A FIN does not consume a
+	// sequence number for reassembly, so data AT the FIN's own number
+	// is still delivered, by tshark and by us; data above it is not,
+	// because nothing ever fills the hole the FIN left. An RST does not
+	// end the stream at all and data after one is delivered normally.
+	if seglen > 0 {
+		if d.haveFin {
+			switch {
+			case f.Seq == d.finSeq:
+				s.stat("tcp.data.atfin")
+			case int32(f.Seq-d.finSeq) > 0:
+				s.stat("tcp.data.afterfin")
+			}
+		}
+		if st.sawRST {
+			s.stat("tcp.data.afterrst")
+		}
+	}
+	if f.TFlags&0x01 != 0 && !d.haveFin {
+		d.finSeq = f.Seq + seglen
+		d.haveFin = true
+	}
+	if f.TFlags&0x04 != 0 {
+		st.sawRST = true
+	}
 }
 
 // deliver places one segment, emits whatever became contiguous, and then

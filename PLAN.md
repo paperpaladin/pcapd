@@ -150,14 +150,19 @@ are looking at.
       why: the case the project exists for.
 - [x] `--overlap=last` as a second policy, and the two outputs differing
       why: a policy flag that produces the same bytes either way is decoration.
-- [ ] sequence number wraparound across 2^32
+- [x] sequence number wraparound across 2^32
       why: a comparison written with `<` instead of serial arithmetic is wrong
       only here, and a capture rarely reaches it by accident.
 - [x] streams with no handshake in the capture
       why: the capture starting late is the normal case on a busy link.
-- [ ] zero-window probes and keep-alives not counted as data
+- [x] zero-window probes and keep-alives not counted as data
       why: a one-byte probe inserted into the stream corrupts it silently.
-- [ ] FIN and RST, and data after FIN
+      measured: half of this item is wrong. A keep-alive is not data and is
+      dropped. A zero-window probe IS data, at the next expected sequence
+      number, and tshark delivers its byte into the stream; what it does not
+      do is advance the analysis position, so a repeated probe is a probe
+      again and not a keep-alive.
+- [x] FIN and RST, and data after FIN
       why: where the stream ends decides what the last bytes are.
 - [x] `pcapd follow` output matching tshark's format byte for byte
       why: a comparison that normalises both sides measures the normaliser.
