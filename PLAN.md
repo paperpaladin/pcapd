@@ -179,7 +179,7 @@ are looking at.
       why: stated in the contract as the obvious attack.
 - [x] construct counter printed by the suite, asserted non-zero per construct
       why: the vacuous-pass guard.
-- [ ] tcpdump cross-check on the packet layer
+- [x] tcpdump cross-check on the packet layer
       why: a second decoder disagreeing with the first is worth knowing about.
 - [ ] Python container parser as a third opinion on block boundaries
       why: tshark and tcpdump share libpcap for classic pcap, so they are not

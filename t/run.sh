@@ -203,6 +203,21 @@ eq "tshark follow: every stream identical" "differ=0 broken=0" "differ=$differ b
 echo "     $streams streams over $files files, $bytes reassembled bytes, $same identical"
 
 echo
+echo "--- the packet layer against tcpdump ---"
+# A second decoder, written by different people, reading classic pcap
+# through libpcap rather than through Wireshark. A smaller set of fields
+# than the tshark comparison and deliberately a different one.
+tc=$(PCAPD=$PCAPD python3 t/tcpdumpcmp.py $(corpus_ok))
+echo "$tc" | grep -v '^TOTAL'
+eval "$(echo "$tc" | sed -n 's/^TOTAL //p')"
+eq "tcpdump: nothing disagrees" "differ=0 broken=0" "differ=$differ broken=$broken"
+echo "     $compared values over $files files: $same same, $differ differ,"
+echo "     $fragskip transport cells skipped on fragments (the two oracles"
+echo "     attribute a fragmented datagram to different packets),"
+echo "     $unparsed tcpdump lines in a shape this does not read,"
+echo "     $cannot files libpcap will not open at all"
+
+echo
 echo "--- the overlap policy, and a second implementation of it ---"
 # tshark implements one policy, so it cannot be the oracle for the other
 # one. This reassembles both from the segment list tshark reports, in
