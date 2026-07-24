@@ -181,7 +181,7 @@ are looking at.
       why: the vacuous-pass guard.
 - [x] tcpdump cross-check on the packet layer
       why: a second decoder disagreeing with the first is worth knowing about.
-- [ ] Python container parser as a third opinion on block boundaries
+- [x] Python container parser as a third opinion on block boundaries
       why: tshark and tcpdump share libpcap for classic pcap, so they are not
       fully independent there.
 - [ ] mutation run over the decoders, survivors recorded

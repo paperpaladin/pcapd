@@ -88,6 +88,7 @@ func readPcapng(b []byte) (*Capture, error) {
 		if trail != total {
 			return nil, fmt.Errorf("pcapng: block at offset %d says length %d at the front and %d at the back", pos, total, trail)
 		}
+		f.Spans = append(f.Spans, Span{pos, int(total), blockName(btype)})
 		body := newCursor(b[pos+8:pos+int(total)-4], be)
 		body.base = pos + 8
 		f.BlockCounts[btype]++

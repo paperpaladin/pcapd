@@ -71,6 +71,18 @@ type Capture struct {
 	BlockCounts map[uint32]int
 	// Names holds pcapng name resolution records.
 	Names []NameRecord
+	// Spans records where in the file each container unit starts and how
+	// long it is: the file header, each classic record, each pcapng
+	// block. It exists so that a parser that knows the container and no
+	// protocol at all can be compared with this one on boundaries alone.
+	Spans []Span
+}
+
+// Span is one unit of the container: an offset, a length and a name.
+type Span struct {
+	Off  int
+	Len  int
+	Kind string
 }
 
 // readPcap decodes a classic pcap file. The byte order is decided by the
@@ -129,6 +141,7 @@ func readPcap(b []byte) (*Capture, error) {
 	// anything writes, but libpcap reads a file claiming 3.4 without
 	// complaint and so does capinfos, and refusing what the oracle reads
 	// is a defect of its own: see t/corpus/bad/pcap-version-3-4.cap.
+	f.Spans = append(f.Spans, Span{0, 24, "fileheader"})
 	f.Ifaces = []Iface{{LinkType: link, SnapLen: f.SnapLen, TsDiv: 1000000, Name: ""}}
 	if nanos {
 		f.Ifaces[0].TsDiv = 1000000000
@@ -136,6 +149,7 @@ func readPcap(b []byte) (*Capture, error) {
 
 	n := 0
 	for c.left() > 0 {
+		at := c.offset()
 		if c.left() < 16 {
 			return nil, fmt.Errorf("pcap: record %d: header truncated at offset %d, %d bytes left", n+1, c.offset(), c.left())
 		}
@@ -154,6 +168,7 @@ func readPcap(b []byte) (*Capture, error) {
 			return nil, fmt.Errorf("pcap: record %d: %w", n+1, c.err)
 		}
 		n++
+		f.Spans = append(f.Spans, Span{at, 16 + int(inclLen), "record"})
 		// A fractional part at or above the units in a second is
 		// malformed: 1500000 microseconds is a second and a half. The
 		// record is kept, because libpcap keeps it and tshark prints a

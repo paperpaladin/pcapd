@@ -26,6 +26,7 @@ commands:
   streams  one line per TCP conversation: index, endpoints, byte counts
   follow   the reassembled bytes of one TCP stream
   check    decode each named file completely; print ok or the refusal
+  blocks   the container layout alone: offset, length and kind per unit
 `
 
 func die(format string, a ...any) {
@@ -86,6 +87,8 @@ func main() {
 		cmdFollow(args)
 	case "check":
 		cmdCheck(args)
+	case "blocks":
+		cmdBlocks(args)
 	default:
 		fmt.Fprintf(os.Stderr, "pcapd: unknown command %q\n", cmd)
 		os.Exit(exitUsage)

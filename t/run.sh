@@ -203,6 +203,21 @@ eq "tshark follow: every stream identical" "differ=0 broken=0" "differ=$differ b
 echo "     $streams streams over $files files, $bytes reassembled bytes, $same identical"
 
 echo
+echo "--- container boundaries against a parser that knows no protocols ---"
+# tshark and tcpdump both read classic pcap through libpcap, so on the
+# container they are one opinion and not two. t/container.py is the
+# second: block and record boundaries worked out in Python from the
+# format alone, with no protocol knowledge and no code shared with
+# pcapd, compared line for line against pcapd blocks.
+co=$(PCAPD=$PCAPD python3 t/container.py $(corpus_ok) t/corpus/conv/*-mod.pcap)
+echo "$co" | grep -v '^TOTAL'
+eval "$(echo "$co" | sed -n 's/^TOTAL //p')"
+eq "container layout: python and pcapd identical" "differ=0 pythononlyrefuses=0" \
+   "differ=$differ pythononlyrefuses=$pythononlyrefuses"
+echo "     $units container units over $agree files, $bothrefuse refused by both,"
+echo "     $pcapdonlyrefuses refused by pcapd alone (it checks more than this does)"
+
+echo
 echo "--- the packet layer against tcpdump ---"
 # A second decoder, written by different people, reading classic pcap
 # through libpcap rather than through Wireshark. A smaller set of fields

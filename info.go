@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // Link type numbers, with the short names capinfos prints for them. The
 // short name is what the suite compares against, because capinfos' long name
@@ -73,4 +76,21 @@ func cmdInfo(c *Capture) {
 	}
 	fmt.Printf("packets: %d\n", len(c.Packets))
 	fmt.Printf("datasize: %d\n", dataSize)
+}
+
+// cmdBlocks prints the container layout and nothing about the packets
+// inside it: one line per unit, offset, length, kind. It exists so that a
+// parser written in Python that knows the container format and no protocol
+// at all can be compared with this one on boundaries alone. tshark and
+// tcpdump share libpcap for classic pcap, so they are not two opinions
+// there, and this is the third.
+func cmdBlocks(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: pcapd blocks FILE")
+		os.Exit(exitUsage)
+	}
+	c := load(args[0])
+	for _, s := range c.Spans {
+		fmt.Printf("%d\t%d\t%s\n", s.Off, s.Len, s.Kind)
+	}
 }
