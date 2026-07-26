@@ -65,7 +65,8 @@ sh t/corpus.sh || { echo "corpus build failed" >&2; exit 2; }
 LIVE=$(ls t/corpus/live/*.pcap 2>/dev/null | wc -l)
 CONV=$(ls t/corpus/conv/* 2>/dev/null | wc -l)
 HAND=$(ls t/corpus/hand/* 2>/dev/null | wc -l)
-echo "live captures: $LIVE   conversions: $CONV   hand-built: $HAND"
+BAD=$(ls t/corpus/bad/* 2>/dev/null | wc -l)
+echo "live captures: $LIVE   conversions: $CONV   hand-built: $HAND   named malformed: $BAD"
 if [ "$LIVE" -eq 0 ]; then
 	echo "SKIP live capture unavailable: every packet below was written by us."
 	echo "     See t/corpus/live.log. This needs unshare -rn to work."

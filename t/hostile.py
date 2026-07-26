@@ -320,7 +320,28 @@ BATCH = 250
 ORACLE_EVERY = int(os.environ.get("HOSTILE_ORACLE_EVERY", "25"))
 
 
+def dump(outdir):
+    """Write the named cases out as real files, one per defect.
+
+    They are built in memory for the sweep, which does not need them on
+    disk. On disk they are worth having: they are the cases a person
+    looks at when one of them regresses, and two comments in the Go
+    source name one each.
+    """
+    os.makedirs(outdir, exist_ok=True)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    n = 0
+    for name, data in named_cases():
+        with open(os.path.join(outdir, name + ".cap"), "wb") as f:
+            f.write(data)
+        n += 1
+    return n
+
+
 def main(argv):
+    if argv[1] == "--dump":
+        print("%d malformed files written to %s" % (dump(argv[2]), argv[2]))
+        return 0
     workdir = argv[1]
     valid = argv[2:]
     os.makedirs(workdir, exist_ok=True)

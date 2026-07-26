@@ -12,20 +12,24 @@
 #   hand/    packets written byte by byte in Python, for the cases no
 #            generator will produce: an overlapping retransmission with a
 #            different payload, a fragment with a gap, a big-endian file.
+#   bad/     the named malformed files, one per defect, with the name
+#            saying what is wrong. The sweep in t/hostile.py builds many
+#            thousands more in a scratch directory and deletes them; these
+#            are the ones worth looking at by hand.
 #
 # Nothing here is committed. The whole directory is in .gitignore, because a
 # capture file in git is a binary blob nobody will ever re-derive.
 set -u
 cd "$(dirname "$0")/.." || exit 2
 C=t/corpus
-mkdir -p "$C/live" "$C/conv" "$C/hand" || exit 2
+mkdir -p "$C/live" "$C/conv" "$C/hand" "$C/bad" || exit 2
 
 if [ "${1:-}" != "-f" ] && [ -f "$C/.stamp" ] \
    && [ "$C/.stamp" -nt t/live.sh ] && [ "$C/.stamp" -nt t/traffic.py ] \
-   && [ "$C/.stamp" -nt t/mkcorpus.py ]; then
+   && [ "$C/.stamp" -nt t/mkcorpus.py ] && [ "$C/.stamp" -nt t/hostile.py ]; then
 	exit 0
 fi
-rm -f "$C"/live/* "$C"/conv/* "$C"/hand/* "$C/.stamp"
+rm -f "$C"/live/* "$C"/conv/* "$C"/hand/* "$C"/bad/* "$C/.stamp"
 
 # Live. A failure here is a loud skip, not a silent one: the hand-built
 # corpus alone is a decoder tested against its author's idea of a packet,
@@ -54,4 +58,9 @@ if [ -e "$C/live/tcp-bulk.pcap" ]; then
 fi
 
 python3 t/mkcorpus.py "$C/hand" || exit 2
+
+# The named malformed files, one per defect, written out so that they can
+# be looked at. The sweep builds them in memory and does not need them on
+# disk; a person reading a refusal in the Go source does.
+python3 t/hostile.py --dump "$C/bad" >/dev/null || exit 2
 touch "$C/.stamp"
