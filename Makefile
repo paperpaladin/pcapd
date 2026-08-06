@@ -21,6 +21,12 @@ hostile: all
 	HOSTILE_FILES="$$(ls t/corpus/hand/* t/corpus/live/*.pcap)" \
 	HOSTILE_ORACLE_EVERY=25 ./t/run.sh
 
+# Mutate the decoders and the reassembler and require the suite to go red
+# for each. About a minute and three quarters per mutant, so roughly an
+# hour for all 29. python3 t/mutants.py GROUP does one group.
+mutants: all
+	python3 t/mutants.py
+
 vet:
 	$(GO) vet ./...
 
@@ -28,4 +34,4 @@ clean:
 	rm -f pcapd
 	rm -rf t/corpus t/tmp.*
 
-.PHONY: all test hostile vet clean
+.PHONY: all test hostile mutants vet clean
