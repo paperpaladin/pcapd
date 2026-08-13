@@ -119,6 +119,7 @@ type Stream struct {
 	Overlaps  int
 	NoHand    bool
 	Dropped   int // bytes held at the end that never became contiguous
+	Missing   int // bytes a hole swallowed that the far end acknowledged
 	heldLimit bool
 	sawRST    bool
 }
@@ -187,6 +188,9 @@ func (s *Session) feedTCP(f *Frame) *Stream {
 	st.Packets++
 	d := &st.dirs[dir]
 	st.classify(s, dir, f)
+	if f.TFlags&0x10 != 0 { // ACK
+		st.ackRelease(s, 1-dir, f.AckNum, f.Pkt.Num)
+	}
 	if !d.haveBase {
 		if f.TFlags&0x02 != 0 { // SYN: the stream starts one past it
 			d.haveBase = true
@@ -301,6 +305,68 @@ func (st *Stream) classify(s *Session, dir int, f *Frame) {
 	}
 	if f.TFlags&0x04 != 0 {
 		st.sawRST = true
+	}
+}
+
+// ackRelease handles the one case where bytes that were never captured
+// still have to be accounted for in the stream.
+//
+// A hole in a direction is normally permanent: nothing fills it and
+// nothing after it is ever delivered. But if the OTHER direction
+// acknowledges past the hole, the bytes did arrive at the far end, and
+// the only thing wrong is that this capture missed them. tshark fills
+// the hole with a marker reading "[N bytes missing in capture file]" and
+// releases everything the acknowledgement covers, and so does this.
+//
+// The rule was measured on seven hand-built files, because the first
+// guess (release at the end of the capture) is wrong and the second
+// (release on any acknowledgement past the next expected byte) is wrong
+// too:
+//
+//   an ack at the start of the hole or inside it releases nothing;
+//   an ack at or past the END of a held segment releases that segment;
+//   two holes and one ack covering both produce two markers;
+//   a segment arriving later to fill the hole is dropped, because the
+//     position has already moved past it.
+//
+// The marker is a chunk of the follow output and is NOT part of the
+// reassembled bytes. The position moves forward without bytes being
+// added, which is the same thing a snapped capture does, so exact goes
+// false and overlapping segments stop being compared.
+func (st *Stream) ackRelease(s *Session, dir int, ack uint32, pkt int) {
+	d := &st.dirs[dir]
+	if !d.haveBase {
+		return
+	}
+	ackAbs := d.nextAbs + int64(int32(ack-d.nextSeq))
+	for len(d.held) > 0 {
+		best := -1
+		for i := range d.held {
+			if best < 0 || d.held[i].abs < d.held[best].abs {
+				best = i
+			}
+		}
+		h := d.held[best]
+		if h.abs+h.wire > ackAbs {
+			return
+		}
+		d.held = append(d.held[:best], d.held[best+1:]...)
+		d.heldByte -= len(h.data)
+		if h.abs > d.nextAbs {
+			gap := h.abs - d.nextAbs
+			st.Chunks = append(st.Chunks, Chunk{
+				Dir:    dir,
+				Data:   []byte(fmt.Sprintf("[%d bytes missing in capture file]\x00", gap)),
+				Packet: pkt,
+			})
+			st.Missing += int(gap)
+			s.stat("tcp.gap.acked")
+			d.nextSeq += uint32(gap)
+			d.nextAbs = h.abs
+			d.exact = false
+		}
+		st.place(s, dir, h.abs, h.wire, h.data, h.packet)
+		st.drain(s, dir)
 	}
 }
 

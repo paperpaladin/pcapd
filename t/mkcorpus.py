@@ -397,10 +397,39 @@ def reassembly_corpus(p):
         tcpseg(0, 1001, b"request-one"), tcpseg(0, 1005, b"XXXX-two"),
         tcpseg(1, 5001, b"reply-one"), tcpseg(1, 5004, b"YYY-two")])
 
-    # A hole that never fills. tshark delivers nothing after it and
-    # neither do we.
+    # A hole that never fills, with nothing acknowledging past it.
+    # tshark delivers nothing after it and neither do we.
     write_pcap(p("re-permanent-gap.pcap"), hs + [
         tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"), tcpseg(1, 5001, b"reply")])
+
+    # The same hole, acknowledged by the other direction. The bytes did
+    # reach the far end; this capture missed them. tshark writes
+    # "[6 bytes missing in capture file]" into the stream at that point
+    # and releases everything the acknowledgement covers. Every one of
+    # these was run through tshark before it was written down, because
+    # the obvious rules are wrong: an acknowledgement at the start of the
+    # hole or inside it releases nothing, and it is the END of a held
+    # segment that has to be covered, not its start.
+    write_pcap(p("re-gap-acked.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"),
+        tcpseg(1, 5001, b"", ACK, 1013)])
+    write_pcap(p("re-gap-ack-at-start.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"),
+        tcpseg(1, 5001, b"", ACK, 1004)])
+    write_pcap(p("re-gap-ack-inside.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"),
+        tcpseg(1, 5001, b"", ACK, 1007)])
+    write_pcap(p("re-gap-two-acked.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"),
+        tcpseg(0, 1020, b"EEE"), tcpseg(1, 5001, b"", ACK, 1023)])
+    write_pcap(p("re-gap-two-ack-first.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"),
+        tcpseg(0, 1020, b"EEE"), tcpseg(1, 5001, b"", ACK, 1013)])
+    # The missing bytes turn up after the position has already moved
+    # past them. They are dropped, by tshark and by us.
+    write_pcap(p("re-gap-acked-then-filled.pcap"), hs + [
+        tcpseg(0, 1001, b"AAA"), tcpseg(0, 1010, b"DDD"),
+        tcpseg(1, 5001, b"", ACK, 1013), tcpseg(0, 1004, b"BBBCCC")])
 
     # No handshake in the capture at all, and the same again where the
     # first data segment is not the lowest sequence number, so the bytes

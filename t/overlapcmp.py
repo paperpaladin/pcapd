@@ -19,7 +19,8 @@ import sys
 PCAPD = os.environ.get("PCAPD", "./pcapd")
 
 FIELDS = ["frame.number", "tcp.stream", "ip.src", "ipv6.src", "tcp.srcport",
-          "tcp.dstport", "tcp.seq_raw", "tcp.len", "tcp.flags", "tcp.payload"]
+          "tcp.dstport", "tcp.seq_raw", "tcp.len", "tcp.flags", "tcp.payload",
+          "tcp.ack_raw"]
 
 
 def segments(path):
@@ -41,6 +42,7 @@ def segments(path):
         src = c[2] or c[3]
         out.append(dict(num=int(c[0]), stream=int(c[1]),
                         who=(src, c[4]), seq=int(c[6]), ln=int(c[7]),
+                        ack=int(c[10]) if c[10] else 0,
                         flags=int(c[8], 16),
                         data=bytes.fromhex(c[9]) if c[9] else b""))
     return out
@@ -62,6 +64,13 @@ def reassemble(segs, last_wins):
             elif s["ln"] > 0:
                 d["have"] = True
                 d["nextseq"] = s["seq"]
+        # An acknowledgement from the other direction releases held
+        # segments it covers, filling the hole in front of them. See
+        # ackRelease in reasm_tcp.go: tshark does this and a capture
+        # that lost packets needs it.
+        if s["flags"] & 0x10:
+            other = st["dirs"][1 - st["nodes"].index(s["who"])]
+            ack_release(other, s["ack"], last_wins)
         if not d["have"] or s["ln"] == 0:
             continue
         delta = s["seq"] - d["nextseq"]
@@ -73,6 +82,31 @@ def reassemble(segs, last_wins):
         drain(d, last_wins)
     return {k: [bytes(v["dirs"][0]["out"]), bytes(v["dirs"][1]["out"])]
             for k, v in streams.items()}
+
+
+def ack_release(d, ack, last_wins):
+    if not d["have"]:
+        return
+    delta = ack - d["nextseq"]
+    if delta > 0x7FFFFFFF:
+        delta -= 1 << 32
+    elif delta < -0x7FFFFFFF:
+        delta += 1 << 32
+    ackabs = d["nextabs"] + delta
+    while d["held"]:
+        i = min(range(len(d["held"])), key=lambda i: d["held"][i][0])
+        abs_, wire, data = d["held"][i]
+        if abs_ + wire > ackabs:
+            return
+        d["held"].pop(i)
+        if abs_ > d["nextabs"]:
+            # The marker tshark prints is not part of the stream bytes,
+            # so the position moves and nothing is appended.
+            d["nextseq"] = (d["nextseq"] + abs_ - d["nextabs"]) & 0xFFFFFFFF
+            d["nextabs"] = abs_
+            d["exact"] = False
+        _write(d, abs_, wire, data, last_wins)
+        drain(d, last_wins)
 
 
 def mkdir():
