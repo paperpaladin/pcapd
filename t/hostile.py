@@ -160,8 +160,18 @@ def named_cases():
     add("pcap-record-header-cut", good[:24 + 9])
     add("pcap-caplen-past-eof",
         good[:24 + 8] + struct.pack("<I", 0x7FFFFFFF) + good[24 + 12:])
+    # Two shapes of the same field pair. The first claims 400 captured
+    # bytes that are not in the file and both oracles refuse it. The
+    # second has every captured byte present and only the ORIGINAL
+    # length is wrong, which both oracles read, reporting frame.len as
+    # the original length and frame.cap_len as the captured one. A
+    # reader that refuses on caplen > origlen alone passes the first and
+    # fails the second, which is what pcapd did.
     add("pcap-caplen-above-origlen",
         good[:24 + 8] + struct.pack("<II", 400, 60) + good[24 + 16:])
+    _incl = struct.unpack("<I", good[24 + 8:24 + 12])[0]
+    add("pcap-origlen-below-caplen",
+        good[:24 + 12] + struct.pack("<I", _incl - 10) + good[24 + 16:])
     add("pcap-usec-too-big",
         good[:24 + 4] + struct.pack("<I", 1500000) + good[24 + 8:])
     # The one file in this list that the two oracles read differently.
@@ -186,6 +196,17 @@ def named_cases():
                 add("pcap-usec-second-record-oracles-differ",
                     b[:110] + b"\xff" + b[111:])
     add("pcap-snaplen-zero", good[:16] + struct.pack("<I", 0) + good[20:])
+    # The link type field is 32 bits and only the low 16 are the type.
+    # Bits 16 to 25 are reserved: libpcap refuses a file that sets any
+    # of them, and reads one that sets bits 26 upwards, which carry
+    # frame-check-sequence information. Both directions are here,
+    # because a reader that ignores the mask entirely passes the second
+    # and fails the first, and a reader that refuses the whole high half
+    # does the opposite.
+    add("pcap-linktype-reserved-bit",
+        good[:20] + struct.pack("<I", 1 | (1 << 20)) + good[24:])
+    add("pcap-linktype-fcs-bits",
+        good[:20] + struct.pack("<I", 1 | (1 << 28)) + good[24:])
     add("pcap-one-byte-short", good[:-1])
 
     # pcapng.

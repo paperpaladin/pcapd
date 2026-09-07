@@ -520,6 +520,11 @@ def main(outdir):
     write_pcap(p("tcp-basic.pcap"), basic)
     write_pcap(p("tcp-basic-be.pcap"), basic, big=True)
     write_pcap(p("tcp-basic-ns.pcap"), basic, nano=True)
+    # Big-endian AND nanosecond. Without this the big-endian branch of
+    # the nanosecond magic is never executed on this corpus, and a
+    # mutation turning it into the microsecond branch survived the whole
+    # suite for exactly that reason.
+    write_pcap(p("tcp-basic-be-ns.pcap"), basic, big=True, nano=True)
     write_pcapng(p("tcp-basic.pcapng"), basic)
     write_pcapng(p("tcp-basic-be.pcapng"), basic, big=True)
 

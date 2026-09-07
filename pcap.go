@@ -157,9 +157,14 @@ func readPcap(b []byte) (*Capture, error) {
 		frac := c.u32()
 		inclLen := c.u32()
 		origLen := c.u32()
-		if inclLen > origLen {
-			return nil, fmt.Errorf("pcap: record %d: captured length %d exceeds original length %d", n+1, inclLen, origLen)
-		}
+		// A captured length above the original length is malformed and
+		// both oracles read it anyway: tshark reports frame.len as the
+		// original length and frame.cap_len as the captured one, and
+		// tcpdump walks the file. pcapd refused it, which is an
+		// over-refusal of the same kind the pcapng reader had. Measured
+		// with the original length one, ten and fifty-three bytes below
+		// the captured length. The bytes themselves are still bounded
+		// by what is left in the file, below.
 		if int64(inclLen) > int64(c.left()) {
 			return nil, fmt.Errorf("pcap: record %d: captured length %d runs past end of file at offset %d, %d bytes left", n+1, inclLen, c.offset(), c.left())
 		}
