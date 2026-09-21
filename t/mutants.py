@@ -45,13 +45,20 @@ MUTANTS = [
      "capLen := uint32(c.left())\n\t\tif origLen < capLen {\n\t\t\tcapLen = origLen\n\t\t}", "kill"),
     ("container", "pcapng.go", "enhanced packet caplen not bounded by the block",
      "if int64(capLen) > int64(c.left()) {\n\t\t\treturn fmt.Errorf(\"pcapng: enhanced packet block at offset %d: captured length %d exceeds %d bytes of block body\",",
-     "if false {\n\t\t\treturn fmt.Errorf(\"pcapng: enhanced packet block at offset %d: captured length %d exceeds %d bytes of block body\",", "kill"),
+     "if false {\n\t\t\treturn fmt.Errorf(\"pcapng: enhanced packet block at offset %d: captured length %d exceeds %d bytes of block body\",",
+     "equivalent: the cursor is the single place a length becomes a "
+     "slice and take() refuses whenever this check would, so the only "
+     "difference is the wording of the refusal. Checked by diffing the "
+     "accept-or-refuse verdict over all 40 named malformed files and "
+     "the whole hand-built corpus: not one changes."),
     ("container", "pcap.go", "captured length may run past the original length check reinstated",
-     "\t\t\t// A captured length above the original length is malformed and",
-     "\t\t\tif inclLen > origLen {\n\t\t\t\treturn nil, fmt.Errorf(\"pcap: record %d: caplen above origlen\", n+1)\n\t\t\t}\n\t\t\t// A captured length above the original length is malformed and",
+     "\t\t// A captured length above the original length is malformed and",
+     "\t\tif inclLen > origLen {\n\t\t\treturn nil, fmt.Errorf(\"pcap: record %d: caplen above origlen\", n+1)\n\t\t}\n\t\t// A captured length above the original length is malformed and",
      "kill"),
     ("container", "pcap.go", "captured length may run past the end of the file",
-     "if int64(inclLen) > int64(c.left()) {", "if false {", "kill"),
+     "if int64(inclLen) > int64(c.left()) {", "if false {",
+     "equivalent: same reason as the enhanced packet block above, and "
+     "checked the same way."),
     ("container", "pcap.go", "nanosecond magic read as microsecond",
      "case magicNsec:\n\t\tbe, nanos = true, true", "case magicNsec:\n\t\tbe, nanos = true, false", "kill"),
     ("container", "pcap.go", "link type reserved bits ignored",
@@ -87,9 +94,10 @@ MUTANTS = [
      "d.base = f.Seq + 1\n\t\t\td.nextSeq = f.Seq + 1", "d.base = f.Seq\n\t\t\td.nextSeq = f.Seq", "kill"),
     ("reassembly", "reasm_tcp.go", "data below the stream origin delivered anyway",
      "if abs+wire <= 0 {\n\t\t\treturn\n\t\t}", "if false {\n\t\t\treturn\n\t\t}", "kill"),
+
     ("reassembly", "reasm_tcp.go", "drain takes the highest held segment, not the lowest",
-     "if best < 0 || d.held[i].abs < d.held[best].abs {",
-     "if best < 0 || d.held[i].abs > d.held[best].abs {", "kill"),
+     "\t\tbest := -1\n\t\tfor i := range d.held {\n\t\t\tif d.held[i].abs > d.nextAbs {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tif best < 0 || d.held[i].abs < d.held[best].abs {",
+     "\t\tbest := -1\n\t\tfor i := range d.held {\n\t\t\tif d.held[i].abs > d.nextAbs {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tif best < 0 || d.held[i].abs > d.held[best].abs {", "kill"),
     ("reassembly", "reasm_tcp.go", "zero-window probe advances the analysis position",
      "if !probe && (!d.haveNseq || int32(next-d.nseq) > 0) {",
      "if _ = probe; !d.haveNseq || int32(next-d.nseq) > 0 {", "kill"),
@@ -98,6 +106,11 @@ MUTANTS = [
      "case (seglen == 0 || seglen == 1) && f.Seq == d.nseq-1 &&\n\t\t\tf.TFlags&0x07 == 0: // not SYN, FIN or RST\n\t\t\ts.stat(\"tcp.keepalive\")\n\t\tcase seglen == 1 && f.Seq == d.nseq && rev.haveWin && rev.win == 0:\n\t\t\tprobe = true\n\t\t\ts.stat(\"tcp.zerowindowprobe\")",
      "equivalent: the two cases cannot both match, since seq cannot be "
      "both nseq and nseq-1, so the order of the switch is not observable"),
+    ("reassembly", "reasm_tcp.go", "an ack releases a held segment whose START it covers",
+     "if h.abs+h.wire > ackAbs {", "if h.abs > ackAbs {", "kill"),
+    ("reassembly", "reasm_tcp.go", "no marker written for an acknowledged gap",
+     "st.Chunks = append(st.Chunks, Chunk{\n\t\t\t\tDir:    dir,\n\t\t\t\tData:   []byte(fmt.Sprintf(\"[%d bytes missing in capture file]\\x00\", gap)),\n\t\t\t\tPacket: pkt,\n\t\t\t})",
+     "", "kill"),
     ("reassembly", "reasm_ip.go", "fragment gap check removed",
      "for i := range filled {\n\t\tif !filled[i] {\n\t\t\ts.stat(\"ipfrag.gap\")\n\t\t\treturn nil, 0, false\n\t\t}\n\t}", "", "kill"),
     ("reassembly", "reasm_ip.go", "later fragment overwrites an earlier one",

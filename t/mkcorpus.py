@@ -389,6 +389,18 @@ def reassembly_corpus(p):
     write_pcap(p("re-overlap-same.pcap"), hs + [
         tcpseg(0, 1001, b"AAAAAA"), tcpseg(0, 1004, b"AAAyyy"),
         tcpseg(0, 1010, b"ZZZ")])
+    # Two held segments that become deliverable at the same moment, so
+    # the order the holder releases them in is observable. Both start
+    # below the new position and both end above it: taking the lower one
+    # first gives CC then DD, taking the higher one first gives DDDD and
+    # nothing else. tshark gives CC then DD. Without this file a
+    # mutation reversing the comparison in drain survives the whole
+    # suite, because every other held segment in the corpus is the only
+    # one eligible when its turn comes.
+    write_pcap(p("re-two-held-at-once.pcap"), hs + [
+        tcpseg(0, 1007, b"CCCCCC"), tcpseg(0, 1009, b"DDDDDD"),
+        tcpseg(0, 1001, b"AAAAAAAAAA")])
+
     # A later segment that starts BEFORE a held one and covers all of it.
     write_pcap(p("re-overlap-swallow.pcap"), hs + [
         tcpseg(0, 1004, b"BBB"), tcpseg(0, 1001, b"AAAAAAAAA")])

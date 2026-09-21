@@ -216,6 +216,17 @@ def named_cases():
     add("ng-block-length-4", goodng[:4] + struct.pack("<I", 4) + goodng[8:])
     add("ng-block-length-not-multiple-of-4",
         goodng[:4] + struct.pack("<I", 29) + goodng[8:])
+    # The two above are both caught by the trailing length, which no
+    # longer matches once the front one is edited. These two write the
+    # trailing copy where the claimed length puts it, so the only thing
+    # left to object to is the length itself. Without the minimum check
+    # the 8-byte block slices a block body from offset 8 to offset 4 and
+    # panics; without the alignment check the 30-byte one is read.
+    add("ng-block-total-8",
+        goodng[:28] + struct.pack("<II", 1, 8) + goodng[28:])
+    add("ng-block-total-30",
+        goodng[:28] + struct.pack("<II", 1, 30) + b"\x00" * 18
+        + struct.pack("<I", 30) + goodng[28:])
     add("ng-block-length-past-eof",
         goodng[:4] + struct.pack("<I", 0x40000000) + goodng[8:])
     add("ng-block-length-max",
