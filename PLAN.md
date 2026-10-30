@@ -186,9 +186,20 @@ are looking at.
       fully independent there.
 - [ ] mutation run over the decoders, survivors recorded
       why: the suite is only worth the mutants it kills.
-- [ ] mutation run over the reassembler, survivors recorded
+- [x] mutation run over the reassembler, survivors recorded
       why: separately, because the corpus for it is the hand-built one.
+      31 mutants, 26 killed, 3 equivalent, 2 survivors, both below.
+- [ ] kill: data below the stream origin is delivered anyway
+      why: the branch is reached, so the case exists and the assertion
+      does not. Nothing checks what comes out when a capture starts
+      mid-connection and a segment older than the origin arrives.
+- [ ] kill: an ack releases a held segment whose start it covers
+      why: the hold queue lets a segment out one ack early and tshark's
+      reassembly agrees with both behaviours on this corpus. The oracle
+      cannot see the difference, so the case that makes it observable has
+      to be built by hand. That is the harder half and the reason this
+      survived rather than an oversight.
 - [x] fuzz sweep: random mutations of valid files, no crash, no hang
       why: a panic is a refusal that did not happen.
-- [ ] README with the measured numbers and what does not work
+- [x] README with the measured numbers and what does not work
       why: a README that only lists successes is not finished.

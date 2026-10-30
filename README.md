@@ -214,11 +214,42 @@ Three files in the full sweep land in this group.
 
 ## Mutation testing
 
-`make mutants` applies 29 single edits to the decoders and the reassembler,
+`make mutants` applies 31 single edits to the decoders and the reassembler,
 one at a time, rebuilds, and runs the whole suite for each. The results and
 the survivors are in `t/mutants.py` and reprinted here.
 
-MUTATION_RESULTS_PLACEHOLDER
+```
+TOTAL mutants=31 killed=26 survived=2 equivalent=3 unusable=0
+```
+
+The target exits non-zero while a survivor stands, so this is a red gate
+rather than a number in a document.
+
+Three are equivalent, each checked rather than argued. Two are length
+bounds on a block that the cursor already enforces: `take()` refuses
+wherever the removed check would have, so the only difference is the
+wording of the refusal, and the accept-or-refuse verdict was diffed over
+all 40 named malformed files and the whole hand-built corpus without one
+changing. The third reorders a switch whose two cases cannot both match,
+because a sequence number cannot be both `nseq` and `nseq - 1`.
+
+Two survive, and both are in the reassembler:
+
+- **data below the stream origin is delivered anyway.** A segment whose
+  sequence number falls before the point the stream began is accepted
+  instead of dropped. The corpus reaches the branch, so this is a missing
+  assertion and not a missing case: nothing currently checks what comes
+  out when a capture starts mid-connection and an older segment arrives.
+- **an ack releases a held segment whose start it covers.** The hold
+  queue lets a segment out one ack too early. tshark's own reassembly
+  agrees with both behaviours on this corpus, which is the reason it
+  survives: the oracle is not sensitive to the difference, so a case
+  where it becomes observable has to be built by hand.
+
+Both are PLAN items rather than entries in a table of excuses. What they
+have in common is worth saying: the mutants that die here are killed by
+tshark disagreeing, and these two are places where tshark cannot see the
+difference, so the suite has to grow its own assertion.
 
 ## What does not work
 

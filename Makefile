@@ -23,7 +23,7 @@ hostile: all
 
 # Mutate the decoders and the reassembler and require the suite to go red
 # for each. About a minute and three quarters per mutant, so roughly an
-# hour for all 29. python3 t/mutants.py GROUP does one group.
+# hour for all 31. python3 t/mutants.py GROUP does one group.
 mutants: all
 	python3 t/mutants.py
 
